@@ -29,10 +29,53 @@ apiBaseUrl: 'http://127.0.0.1:8000/api/v1'
 ## 真机与上线
 
 - 真机中的 `127.0.0.1` 指向手机自身，无法访问电脑后端。
-- 局域网调试时需换成电脑局域网地址；正式上线必须使用 HTTPS 且配置微信 request 合法域名。
-- `utils/api.js` 已预留 `wx.cloud.callContainer`。使用云托管时，在 `config.js` 中设置 `useCloud`、`cloudEnv` 和 `cloudService`。
+- 局域网调试时需换成电脑局域网地址。
+- `utils/api.js` 已接入 `wx.cloud.callContainer`。使用微信云托管时，推荐按下面的“云托管原生调用”配置；这条路径不经过 `wx.request`，不需要把云托管公网地址添加为 request 合法域名。
 - 不要把模型 Key、数据库密码、微信 AppSecret 写进 `config.js`；这些只应存在于后端环境变量或云端密钥配置。
 - 当前后端使用单一本地身份。正式多人使用前，应接入微信登录，以 OpenID 映射后端用户并增加数据隔离。
+
+### 云托管原生调用（推荐）
+
+先在微信云托管控制台找到：
+
+- 环境 ID：云托管环境的 ID，不是服务名称；
+- 服务名称：云托管“服务管理 -> 服务列表”里部署 FastAPI 的服务名称。
+
+然后修改 `miniprogram/config.js`：
+
+```js
+module.exports = {
+  apiBaseUrl: 'http://127.0.0.1:8000/api/v1',
+  requestTimeout: 20000,
+  useCloud: true,
+  cloudEnv: '你的云托管环境ID',
+  cloudService: '你的服务名称',
+  apiPrefix: '/api/v1',
+}
+```
+
+应用启动时会执行 `wx.cloud.init`，所有 API 请求由 `wx.cloud.callContainer` 发出，并自动附带：
+
+```text
+X-WX-SERVICE: 你的服务名称
+```
+
+验证顺序：
+
+1. 确认小程序 AppID 与该云托管环境属于同一微信账号或已正确关联；
+2. 在开发者工具中打开“调试器 -> Network”；
+3. 进入“复习”页面，应能成功请求 `/api/v1/reviews/queue`；
+4. 若返回服务不存在，核对 `cloudService`；若提示环境错误，核对 `cloudEnv`；若返回 5xx，查看云托管容器日志和 `/api/v1/ready`。
+
+### 公网 HTTPS 调用（备选）
+
+只有将 `useCloud` 设为 `false` 并让小程序通过 `wx.request` 访问公网 HTTPS 地址时，才需要在微信公众平台配置：
+
+```text
+开发管理 -> 开发设置 -> 服务器域名 -> request 合法域名
+```
+
+这里填写纯域名，例如 `https://api.example.com`，不能包含 `/api/v1` 路径。随后把 `apiBaseUrl` 改为 `https://api.example.com/api/v1`。正式版本不能使用 HTTP、IP 地址、localhost 或临时随机隧道域名。
 
 ## 当前页面
 

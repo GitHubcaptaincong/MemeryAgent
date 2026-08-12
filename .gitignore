@@ -16,6 +16,7 @@ frontend/dist/
 .idea/
 .vscode/
 project.private.config.json
+miniprogram/config.local.js
 *.pem
 *.key
 *.p12

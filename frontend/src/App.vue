@@ -536,11 +536,16 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="shell">
+  <div class="shell" :class="{ 'mini-shell': isPublicDemo }">
     <header class="topbar">
       <a class="brand" href="#">Memory Agent <span>01</span></a>
       <p>把材料变成可验证的理解</p>
       <div class="system-status"><i></i> {{ isPublicDemo ? 'Public Demo' : 'Local MVP' }}</div>
+    </header>
+
+    <header v-if="isPublicDemo" class="mini-appbar">
+      <span>Memory Agent</span>
+      <b>只读演示</b>
     </header>
 
     <main>
@@ -562,9 +567,10 @@ onMounted(() => {
       </aside>
 
       <section v-if="activeView === 'organize'" class="hero">
-        <p class="eyebrow">AGENTIC LEARNING WORKSPACE</p>
-        <h1>读进去，<em>讲出来。</em></h1>
-        <p class="hero-copy">Agent 会自主读取材料、选择技能、拆分知识单元并检查证据。任何长期记忆，都由你最后决定。</p>
+        <p class="eyebrow">{{ isPublicDemo ? 'QUICK CAPTURE' : 'AGENTIC LEARNING WORKSPACE' }}</p>
+        <h1 v-if="isPublicDemo">今天想记住什么？</h1>
+        <h1 v-else>读进去，<em>讲出来。</em></h1>
+        <p class="hero-copy">{{ isPublicDemo ? '写下来就可以离开。原文会先保存，Agent 在后台把它整理成可练习的知识。' : 'Agent 会自主读取材料、选择技能、拆分知识单元并检查证据。任何长期记忆，都由你最后决定。' }}</p>
       </section>
 
       <section v-if="activeView === 'organize'" class="workspace">
