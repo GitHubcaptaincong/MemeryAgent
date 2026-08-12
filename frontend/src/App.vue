@@ -1,7 +1,10 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { publicDemo } from './demoData.js'
 
 const apiBase = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
+const isPublicDemo = import.meta.env.VITE_PUBLIC_DEMO === 'true'
+const demoReadOnlyMessage = '公开演示模式不会连接后端、写入数据或调用模型。'
 const form = ref({
   title: '',
   learning_goal: '',
@@ -89,6 +92,7 @@ const signalAge = computed(() => {
 const dueCount = computed(() => reviewOverview.value.due_count ?? reviewQueue.value.length)
 
 async function api(path, options = {}) {
+  if (isPublicDemo) throw new Error(demoReadOnlyMessage)
   const response = await fetch(`${apiBase}${path}`, {
     ...options,
     headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
@@ -102,6 +106,10 @@ async function api(path, options = {}) {
 
 async function startRun() {
   error.value = ''
+  if (isPublicDemo) {
+    error.value = demoReadOnlyMessage
+    return
+  }
   if (!form.value.content.trim()) {
     error.value = '请先输入想记录或学习的内容。'
     return
@@ -272,6 +280,10 @@ async function loadDraft() {
 
 async function confirmDraft() {
   if (!draft.value) return
+  if (isPublicDemo) {
+    error.value = demoReadOnlyMessage
+    return
+  }
   error.value = ''
   busy.value = true
   try {
@@ -289,8 +301,8 @@ async function confirmDraft() {
 async function showView(view) {
   activeView.value = view
   window.scrollTo({ top: 0, behavior: 'auto' })
-  if (view === 'review') await loadReviewData().catch((reason) => { reviewError.value = reason.message })
-  if (view === 'reminders') await loadReminderSettings().catch((reason) => { error.value = reason.message })
+  if (!isPublicDemo && view === 'review') await loadReviewData().catch((reason) => { reviewError.value = reason.message })
+  if (!isPublicDemo && view === 'reminders') await loadReminderSettings().catch((reason) => { error.value = reason.message })
 }
 
 async function loadReviewQueue() {
@@ -322,6 +334,15 @@ function selectReviewCard(card) {
 
 async function submitReviewAnswer() {
   if (!activeReviewCard.value || !reviewAnswer.value.trim()) return
+  if (isPublicDemo) {
+    reviewAnswerResult.value = {
+      attempt_id: `demo-attempt-${activeReviewCard.value.id}`,
+      answer: reviewAnswer.value.trim(),
+      answer_key: activeReviewCard.value.answer_key,
+      evidence: activeReviewCard.value.evidence,
+    }
+    return
+  }
   const answer = reviewAnswer.value.trim()
   if (!reviewAnswerKey.value || reviewSubmittedAnswer.value !== answer) {
     reviewAnswerKey.value = eventKey('answer')
@@ -346,6 +367,23 @@ async function submitReviewAnswer() {
 
 async function rateReview(rating) {
   if (!activeReviewCard.value || !reviewAnswerResult.value) return
+  if (isPublicDemo) {
+    const reviewedCard = activeReviewCard.value
+    const selectedOption = reviewedCard.rating_options.find((item) => item.rating === rating)
+    reviewHistory.value = [{
+      id: `demo-history-${Date.now()}`,
+      card_id: reviewedCard.id,
+      title: reviewedCard.title,
+      source_title: reviewedCard.source_title,
+      rating,
+      next_due_at: selectedOption?.due_at,
+    }, ...reviewHistory.value].slice(0, 10)
+    reviewQueue.value = reviewQueue.value.filter((item) => item.id !== reviewedCard.id)
+    reviewedThisSession.value += 1
+    reviewOverview.value = { ...reviewOverview.value, due_count: reviewQueue.value.length, total_active: 2 }
+    selectReviewCard(reviewQueue.value[0] || null)
+    return
+  }
   if (reviewRatingKey.value && reviewRatingValue.value !== rating) {
     reviewError.value = '上次评分的响应未确认，请用原评分重试。'
     return
@@ -388,6 +426,10 @@ async function loadReminderSettings() {
 }
 
 async function saveReminderSettings() {
+  if (isPublicDemo) {
+    error.value = demoReadOnlyMessage
+    return
+  }
   reminderBusy.value = true
   reminderSaved.value = false
   error.value = ''
@@ -442,6 +484,10 @@ function formatHistoryRating(rating) {
 
 async function decideMemory(candidate, decision) {
   error.value = ''
+  if (isPublicDemo) {
+    error.value = demoReadOnlyMessage
+    return
+  }
   try {
     await api(`/api/v1/memory-candidates/${candidate.id}/decision`, {
       method: 'POST',
@@ -457,12 +503,33 @@ function formatTime(value) {
   return new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(new Date(value))
 }
 
+function loadPublicDemo() {
+  form.value = {
+    ...form.value,
+    title: publicDemo.source.title,
+    learning_goal: publicDemo.source.learning_goal,
+    content: publicDemo.source.content,
+  }
+  savedSource.value = publicDemo.source
+  run.value = publicDemo.run
+  events.value = [...publicDemo.events]
+  draft.value = publicDemo.draft
+  reviewQueue.value = [...publicDemo.reviewQueue]
+  reviewOverview.value = { due_count: publicDemo.reviewQueue.length, total_active: publicDemo.reviewQueue.length, next_due_at: null }
+  reviewHistory.value = [...publicDemo.reviewHistory]
+  selectReviewCard(reviewQueue.value[0])
+}
+
 onBeforeUnmount(() => {
   closeStream()
   stopClock()
 })
 
 onMounted(() => {
+  if (isPublicDemo) {
+    loadPublicDemo()
+    return
+  }
   loadReviewData().catch(() => {})
   loadReminderSettings().catch(() => {})
 })
@@ -473,7 +540,7 @@ onMounted(() => {
     <header class="topbar">
       <a class="brand" href="#">Memory Agent <span>01</span></a>
       <p>把材料变成可验证的理解</p>
-      <div class="system-status"><i></i> Local MVP</div>
+      <div class="system-status"><i></i> {{ isPublicDemo ? 'Public Demo' : 'Local MVP' }}</div>
     </header>
 
     <main>
@@ -489,6 +556,11 @@ onMounted(() => {
         </button>
       </nav>
 
+      <aside v-if="isPublicDemo" class="demo-banner" role="status">
+        <div><b>公开只读演示</b><span>当前展示的是脱敏示例数据；交互只发生在浏览器内，不连接数据库，也不会调用模型。</span></div>
+        <small>DEMO · NO PERSISTENCE</small>
+      </aside>
+
       <section v-if="activeView === 'organize'" class="hero">
         <p class="eyebrow">AGENTIC LEARNING WORKSPACE</p>
         <h1>读进去，<em>讲出来。</em></h1>
@@ -502,20 +574,20 @@ onMounted(() => {
             <div><h2>投递学习材料</h2><p>本阶段支持文本与 Markdown，最多 10,000 字。</p></div>
           </div>
 
-          <label>标题 <small class="optional">可选</small><input v-model="form.title" maxlength="300" placeholder="留空时使用“快速记录”" /></label>
-          <label>这次想学会什么？ <small class="optional">可选</small><input v-model="form.learning_goal" maxlength="500" placeholder="留空时自动整理并记住内容" /></label>
+          <label>标题 <small class="optional">可选</small><input v-model="form.title" :disabled="isPublicDemo" maxlength="300" placeholder="留空时使用“快速记录”" /></label>
+          <label>这次想学会什么？ <small class="optional">可选</small><input v-model="form.learning_goal" :disabled="isPublicDemo" maxlength="500" placeholder="留空时自动整理并记住内容" /></label>
           <label class="content-field">
             <span>材料正文 <small :class="{ danger: charCount > 10000 }">{{ charCount.toLocaleString() }} / 10,000</small></span>
-            <textarea v-model="form.content" maxlength="10000" placeholder="粘贴文章、课程笔记或自己的思考……"></textarea>
+            <textarea v-model="form.content" :disabled="isPublicDemo" maxlength="10000" placeholder="粘贴文章、课程笔记或自己的思考……"></textarea>
           </label>
           <label class="switch-row">
-            <input v-model="form.web_access_allowed" type="checkbox" />
+            <input v-model="form.web_access_allowed" :disabled="isPublicDemo" type="checkbox" />
             <span class="switch"></span>
             <span><strong>允许外部检索</strong><small>默认关闭；MVP 尚未接入真实搜索工具</small></span>
           </label>
           <p v-if="error" class="error">{{ error }}</p>
-          <button class="primary" :disabled="busy || charCount > 10000">
-            <span>{{ busy && savedSource ? '原文已保存 · AI 后台整理中' : (busy ? '正在保存' : (charCount <= 600 ? '快速记录并整理' : '开始生成知识草稿')) }}</span><b>→</b>
+          <button class="primary" :disabled="isPublicDemo || busy || charCount > 10000">
+            <span>{{ isPublicDemo ? '公开演示不提交数据' : (busy && savedSource ? '原文已保存 · AI 后台整理中' : (busy ? '正在保存' : (charCount <= 600 ? '快速记录并整理' : '开始生成知识草稿'))) }}</span><b>→</b>
           </button>
           <div v-if="savedSource" class="capture-receipt">
             <b>✓ 原文已记录</b>
@@ -678,27 +750,27 @@ onMounted(() => {
         <div class="reminder-layout">
           <form class="reminder-form" @submit.prevent="saveReminderSettings">
             <label class="setting-row switch-row">
-              <input v-model="reminder.enabled" type="checkbox" />
+              <input v-model="reminder.enabled" :disabled="isPublicDemo" type="checkbox" />
               <span class="switch"></span>
               <span><strong>启用复习提醒</strong><small>保留每日提醒时间与待复习队列设置</small></span>
             </label>
             <label class="setting-row">
               <span><strong>提醒时间</strong><small>每天优先在这个时间开始复习</small></span>
-              <input v-model="reminder.preferred_time" type="time" :disabled="!reminder.enabled" />
+              <input v-model="reminder.preferred_time" type="time" :disabled="isPublicDemo || !reminder.enabled" />
             </label>
             <label class="setting-row">
               <span><strong>每日上限</strong><small>避免一次出现太多任务</small></span>
-              <input v-model.number="reminder.daily_limit" type="number" min="1" max="100" :disabled="!reminder.enabled" />
+              <input v-model.number="reminder.daily_limit" type="number" min="1" max="100" :disabled="isPublicDemo || !reminder.enabled" />
             </label>
             <label class="setting-row switch-row">
-              <input v-model="reminder.overdue_enabled" type="checkbox" :disabled="!reminder.enabled" />
+              <input v-model="reminder.overdue_enabled" type="checkbox" :disabled="isPublicDemo || !reminder.enabled" />
               <span class="switch"></span>
               <span><strong>包含逾期内容</strong><small>优先补回已经错过的复习</small></span>
             </label>
             <div class="timezone-row"><span>时区</span><strong>{{ reminder.timezone }}</strong></div>
             <p v-if="error" class="error">{{ error }}</p>
             <p v-if="reminderSaved" class="saved-message">✓ 提醒偏好已保存</p>
-            <button class="primary" :disabled="reminderBusy"><span>{{ reminderBusy ? '正在保存' : '保存提醒设置' }}</span><b>→</b></button>
+            <button class="primary" :disabled="isPublicDemo || reminderBusy"><span>{{ isPublicDemo ? '公开演示不保存设置' : (reminderBusy ? '正在保存' : '保存提醒设置') }}</span><b>→</b></button>
           </form>
 
           <aside class="delivery-status">

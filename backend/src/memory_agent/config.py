@@ -21,6 +21,7 @@ class Settings(BaseSettings):
 
     env: str = "development"
     database_url: str = "sqlite+pysqlite:///./memory_agent.db"
+    cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
     local_user_id: UUID = UUID("00000000-0000-0000-0000-000000000001")
     local_user_email: str = "local@memory-agent.test"
     model_provider: str = "fake"
@@ -47,6 +48,10 @@ class Settings(BaseSettings):
     @property
     def is_sqlite(self) -> bool:
         return self.database_url.startswith("sqlite")
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        return [origin.strip().rstrip("/") for origin in self.cors_origins.split(",") if origin.strip()]
 
     @property
     def model_api_key_value(self) -> str | None:

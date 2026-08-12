@@ -118,6 +118,18 @@ APP_SKILL_ROOT=/skills
 
 根目录 Dockerfile 会在启动时执行 `alembic upgrade head`，因此目标 PostgreSQL 必须在容器启动前可连接。`frontend/` 和 `miniprogram/` 不需要由这个容器提供；小程序只调用云托管暴露的 FastAPI 地址。
 
+## GitHub Pages 公开演示与 Neon
+
+仓库包含 GitHub Pages 自动部署工作流。`main` 分支更新前端后，会构建一个完全使用脱敏示例数据的只读演示版；该版本不会连接后端、数据库或模型服务。
+
+首次发布时，在 GitHub 仓库 `Settings -> Pages` 中将 Source 选择为 `GitHub Actions`。本仓库的默认访问地址为：
+
+```text
+https://githubcaptaincong.github.io/MemeryAgent/
+```
+
+CloudBase 后端继续使用 PostgreSQL。低频个人展示可以使用 Neon Free，将 Neon 连接串仅保存到 CloudBase 的 `APP_DATABASE_URL` 环境变量。完整步骤、CORS 配置及上线边界见 [低成本公开演示部署](./docs/deployment-github-neon.md)。
+
 ## 验证
 
 ```powershell

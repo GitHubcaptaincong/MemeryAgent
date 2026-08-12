@@ -1,0 +1,105 @@
+const now = Date.now()
+const isoAfterMinutes = (minutes) => new Date(now + minutes * 60_000).toISOString()
+
+export const publicDemo = {
+  source: {
+    id: 'demo-source',
+    title: '费曼学习法：用主动解释暴露知识盲区',
+    learning_goal: '理解为什么“讲出来”比重复阅读更容易发现理解缺口',
+    content: '费曼学习法要求学习者先选择一个概念，并尝试用简单语言解释它。当解释出现含糊、跳步或卡顿时，这些位置通常就是知识盲区。学习者应回到材料补齐理解，再次解释，并用例子验证自己是否真正掌握。',
+    char_count: 89,
+    save_ms: 37,
+  },
+  run: {
+    id: 'demo-run',
+    state: 'completed',
+  },
+  events: [
+    { seq: 1, event_type: 'run.created', payload: {}, created_at: isoAfterMinutes(-6) },
+    { seq: 2, event_type: 'source.loaded', payload: { char_count: 89 }, created_at: isoAfterMinutes(-5.8) },
+    { seq: 3, event_type: 'memory.retrieved', payload: { count: 2 }, created_at: isoAfterMinutes(-5.4) },
+    { seq: 4, event_type: 'skills.selected', payload: { skills: ['knowledge-decomposition', 'evidence-grounding'] }, created_at: isoAfterMinutes(-5.1) },
+    { seq: 5, event_type: 'agent.plan_created', payload: { processing_mode: 'quick' }, created_at: isoAfterMinutes(-4.8) },
+    { seq: 6, event_type: 'tool.completed', payload: { tool: 'source_read', result_summary: { char_count: 89 } }, created_at: isoAfterMinutes(-4.2) },
+    { seq: 7, event_type: 'tool.completed', payload: { tool: 'schema_validate', result_summary: { valid: true } }, created_at: isoAfterMinutes(-3.5) },
+    { seq: 8, event_type: 'draft.created', payload: { unit_count: 2 }, created_at: isoAfterMinutes(-3) },
+    { seq: 9, event_type: 'review.cards_created', payload: { count: 2 }, created_at: isoAfterMinutes(-2.6) },
+  ],
+  draft: {
+    id: 'demo-draft',
+    status: 'confirmed',
+    agent_summary: {
+      overview: '材料被拆成两个可独立复习的知识单元，并保留了原文证据。',
+    },
+    units: [
+      {
+        id: 'demo-unit-1',
+        position: 1,
+        title: '主动解释是一种理解测试',
+        learning_objective: '理解解释过程为什么能够暴露知识盲区',
+        explanation: '重复阅读容易产生熟悉感；主动解释要求重新组织因果与步骤，因此含糊、跳步和卡顿会显露尚未建立的理解。',
+        question: '为什么主动解释比重复阅读更容易发现知识盲区？',
+        answer_key: ['解释要求主动重建知识结构，而不只是识别熟悉内容', '卡顿、含糊和跳步是理解不完整的可观察信号'],
+        confidence: 0.96,
+        evidence: [{ quote: '当解释出现含糊、跳步或卡顿时，这些位置通常就是知识盲区。' }],
+      },
+      {
+        id: 'demo-unit-2',
+        position: 2,
+        title: '从发现缺口到验证掌握',
+        learning_objective: '掌握费曼学习法的完整纠错闭环',
+        explanation: '发现解释缺口后，学习者回到材料补齐理解，再次用简单语言解释，并通过例子检验迁移能力。',
+        question: '发现自己讲不清楚以后，应该依次做什么？',
+        answer_key: ['定位讲不清楚的具体位置', '回到材料补齐理解', '重新简化解释', '用例子验证是否真正掌握'],
+        confidence: 0.94,
+        evidence: [{ quote: '学习者应回到材料补齐理解，再次解释，并用例子验证自己是否真正掌握。' }],
+      },
+    ],
+  },
+  reviewQueue: [
+    {
+      id: 'demo-card-1',
+      title: '主动解释与知识盲区',
+      question: '为什么主动解释比重复阅读更容易发现知识盲区？',
+      hints: ['比较“识别熟悉内容”和“重新组织解释”'],
+      source_title: '费曼学习法',
+      learning_objective: '理解主动解释的诊断作用',
+      review_count: 1,
+      rating_options: [
+        { rating: 1, due_at: isoAfterMinutes(1), interval_days: 1 / 1440 },
+        { rating: 2, due_at: isoAfterMinutes(10), interval_days: 10 / 1440 },
+        { rating: 3, due_at: isoAfterMinutes(1440), interval_days: 1 },
+        { rating: 4, due_at: isoAfterMinutes(5760), interval_days: 4 },
+      ],
+      answer_key: ['解释要求主动重建知识结构，而不只是识别熟悉内容', '卡顿、含糊和跳步会暴露理解不完整的位置'],
+      evidence: [{ quote: '当解释出现含糊、跳步或卡顿时，这些位置通常就是知识盲区。' }],
+    },
+    {
+      id: 'demo-card-2',
+      title: '费曼学习闭环',
+      question: '发现自己讲不清楚以后，应该依次做什么？',
+      hints: ['从定位缺口开始'],
+      source_title: '费曼学习法',
+      learning_objective: '掌握发现缺口后的纠错流程',
+      review_count: 0,
+      rating_options: [
+        { rating: 1, due_at: isoAfterMinutes(1), interval_days: 1 / 1440 },
+        { rating: 2, due_at: isoAfterMinutes(10), interval_days: 10 / 1440 },
+        { rating: 3, due_at: isoAfterMinutes(1440), interval_days: 1 },
+        { rating: 4, due_at: isoAfterMinutes(5760), interval_days: 4 },
+      ],
+      answer_key: ['定位解释缺口', '回到材料补齐理解', '重新简化解释', '用例子验证掌握'],
+      evidence: [{ quote: '学习者应回到材料补齐理解，再次解释，并用例子验证自己是否真正掌握。' }],
+    },
+  ],
+  reviewHistory: [
+    {
+      id: 'demo-history-1',
+      card_id: 'demo-history-card-1',
+      title: '主动解释的目的',
+      source_title: '费曼学习法',
+      rating: 3,
+      next_due_at: isoAfterMinutes(1440),
+    },
+  ],
+}
