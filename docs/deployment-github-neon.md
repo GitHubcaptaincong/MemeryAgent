@@ -54,6 +54,7 @@ Settings -> Pages -> Build and deployment -> Source -> GitHub Actions
 
 ```text
 GET  /api/v1/health
+GET  /api/v1/ready
 POST /api/v1/sources
 POST /api/v1/runs
 GET  /api/v1/review/overview

@@ -37,6 +37,7 @@ function eventLabel(event) {
     'run.retryable_error': '模型服务暂时异常',
     'run.retry_scheduled': '已安排自动重试',
     'review.cards_created': '已创建复习卡',
+    'memory.candidate_created': '已生成待审批的长期记忆候选',
   }
   return labels[event.event_type] || event.event_type
 }

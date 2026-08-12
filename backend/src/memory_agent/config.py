@@ -1,6 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urlsplit
 from uuid import UUID
 
 from pydantic import Field, SecretStr, field_validator
@@ -57,6 +58,21 @@ class Settings(BaseSettings):
         if value.startswith("postgresql+psycopg2://"):
             return value.replace("postgresql+psycopg2://", "postgresql+psycopg://", 1)
         return value
+
+    @field_validator("model_base_url", mode="before")
+    @classmethod
+    def validate_model_base_url(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        normalized = value.strip().rstrip("/")
+        if any(character in normalized for character in (",", "，", "。", "\n", "\r")):
+            raise ValueError("model base URL contains punctuation or a line break")
+        parsed = urlsplit(normalized)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ValueError("model base URL must be an absolute HTTP(S) URL")
+        if parsed.path.rstrip("/") != "/v1":
+            raise ValueError("CLIProxy model base URL must end with /v1")
+        return normalized
 
     @property
     def is_sqlite(self) -> bool:

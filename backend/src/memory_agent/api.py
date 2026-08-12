@@ -8,7 +8,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from memory_agent.bootstrap import ensure_local_identity
@@ -85,6 +85,12 @@ def health(settings: Settings = Depends(get_settings)) -> HealthRead:
         model_name=settings.model_name,
         database="sqlite" if settings.is_sqlite else "postgresql",
     )
+
+
+@router.get("/ready")
+def ready(session: Session = Depends(get_session)) -> dict[str, str]:
+    session.execute(text("SELECT 1"))
+    return {"status": "ready"}
 
 
 @router.get("/review/queue", response_model=list[ReviewCardRead])

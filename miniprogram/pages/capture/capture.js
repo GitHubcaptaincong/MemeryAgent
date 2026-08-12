@@ -213,9 +213,9 @@ Page({
     this.setData({ busy: true, error: '' })
     try {
       const draft = await api.post(`/drafts/${this.data.draft.id}/confirm`, {})
-      wx.removeStorageSync('memoryAgentActiveRunId')
       wx.setStorageSync('memoryAgentReviewQueueDirty', true)
-      this.setData({ draft, busy: false })
+      this.setData({ draft })
+      await this.pollRun()
       await this.loadMemoryCandidates()
       wx.showToast({ title: '已加入复习', icon: 'success' })
     } catch (error) {

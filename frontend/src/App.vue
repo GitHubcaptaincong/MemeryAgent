@@ -225,7 +225,8 @@ function eventTitle(item) {
     'run.retry_scheduled': `已安排第 ${payload.attempt || '?'} 次尝试`,
     'run.recovery_started': '正在从持久化业务状态安全恢复',
     'run.expired_lease_recovered': '原 Worker 租约已过期，新 Worker 已接管',
-    'review.cards_created': `已创建 ${payload.count || 0} 张复习卡，确认后即可开始练习`,
+    'review.cards_created': `已创建 ${payload.card_count ?? payload.count ?? 0} 张复习卡，可以开始练习`,
+    'memory.candidate_created': '已生成待你审批的长期记忆候选',
   }
   if (item.event_type === 'tool.completed') return toolResultTitle(payload)
   return labels[item.event_type] || item.event_type
@@ -271,7 +272,23 @@ function closeStream() {
 }
 
 async function refreshRun() {
-  if (run.value?.id) run.value = await api(`/api/v1/runs/${run.value.id}`)
+  if (!run.value?.id) return
+  run.value = await api(`/api/v1/runs/${run.value.id}`)
+}
+
+async function refreshVisibleEvents() {
+  if (!run.value?.id) return
+  const afterSeq = events.value.reduce((latest, item) => Math.max(latest, item.seq || 0), 0)
+  const newEvents = await api(`/api/v1/runs/${run.value.id}/events?after_seq=${afterSeq}`)
+  if (newEvents.length) {
+    events.value.push(...newEvents.filter((item) => !events.value.some((existing) => existing.seq === item.seq)))
+    const latest = events.value[events.value.length - 1]
+    livePulse.value = { message: eventTitle(latest) }
+    lastSignalAt.value = Date.now()
+  } else if (run.value) {
+    livePulse.value = { message: stateLabels[run.value.state] || run.value.state }
+    lastSignalAt.value = Date.now()
+  }
 }
 
 async function loadDraft() {
@@ -288,7 +305,7 @@ async function confirmDraft() {
   busy.value = true
   try {
     draft.value = await api(`/api/v1/drafts/${draft.value.id}/confirm`, { method: 'POST' })
-    await refreshRun()
+    await Promise.all([refreshRun(), refreshVisibleEvents()])
     memoryCandidates.value = await api('/api/v1/memory-candidates?status=pending')
     await loadReviewData()
   } catch (reason) {
@@ -536,16 +553,10 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="shell" :class="{ 'mini-shell': isPublicDemo }">
-    <header class="topbar">
-      <a class="brand" href="#">Memory Agent <span>01</span></a>
-      <p>把材料变成可验证的理解</p>
-      <div class="system-status"><i></i> {{ isPublicDemo ? 'Public Demo' : 'Local MVP' }}</div>
-    </header>
-
-    <header v-if="isPublicDemo" class="mini-appbar">
+  <div class="shell mini-shell">
+    <header class="mini-appbar">
       <span>Memory Agent</span>
-      <b>只读演示</b>
+      <b>{{ isPublicDemo ? '只读演示' : '移动客户端' }}</b>
     </header>
 
     <main>
@@ -567,10 +578,9 @@ onMounted(() => {
       </aside>
 
       <section v-if="activeView === 'organize'" class="hero">
-        <p class="eyebrow">{{ isPublicDemo ? 'QUICK CAPTURE' : 'AGENTIC LEARNING WORKSPACE' }}</p>
-        <h1 v-if="isPublicDemo">今天想记住什么？</h1>
-        <h1 v-else>读进去，<em>讲出来。</em></h1>
-        <p class="hero-copy">{{ isPublicDemo ? '写下来就可以离开。原文会先保存，Agent 在后台把它整理成可练习的知识。' : 'Agent 会自主读取材料、选择技能、拆分知识单元并检查证据。任何长期记忆，都由你最后决定。' }}</p>
+        <p class="eyebrow">QUICK CAPTURE</p>
+        <h1>今天想记住什么？</h1>
+        <p class="hero-copy">写下来就可以离开。原文会先保存，Agent 在后台把它整理成可练习的知识。</p>
       </section>
 
       <section v-if="activeView === 'organize'" class="workspace">

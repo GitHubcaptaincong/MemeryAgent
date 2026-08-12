@@ -25,8 +25,8 @@
 - 评分前由服务端返回四档真实调度预览；评分后可查看最近复习、下一次到期和当前到期数量。
 - 旧 MVP 卡片保留原到期时间，并在下一次评分时从不可变 `review_rated` 事件重放迁移到 FSRS；历史不完整时拒绝静默重置。
 - 提醒偏好持久化：启用状态、每日时间、数量上限、逾期策略和时区。
-- Vue 3 三页工作台：整理、复习、提醒。
-- 原生微信小程序客户端：iOS 风格移动界面、快速记录、Agent 进度、复习作答与提醒设置；现有 Vue 端继续保留。
+- Vue 3 移动 H5：复用微信小程序的信息架构和 iOS 风格，用于 GitHub Pages 公开演示与浏览器调试。
+- 原生微信小程序客户端：快速记录、Agent 进度、复习作答与提醒设置。
 
 当前已支持通过 OpenAI-compatible Responses API 接入 CLIProxy，并保留 `FakeModelAdapter` 作为确定性回归基线。外部网页搜索、Embedding 生成、AI 语义判分、FSRS 个性化参数训练和浏览器/系统通知尚未接入。
 
@@ -55,9 +55,10 @@ docker compose up --build
 
 启动后访问：
 
-- 工作台：http://localhost:5173
+- 移动 H5：http://localhost:5173
 - API 文档：http://localhost:8000/docs
 - API 健康检查：http://localhost:8000/api/v1/health
+- API 就绪检查：http://localhost:8000/api/v1/ready
 
 微信小程序请在微信开发者工具中导入仓库根目录。配置与真机联调说明见 [miniprogram/README.md](./miniprogram/README.md)。
 
@@ -145,7 +146,7 @@ npm run build
 ```text
 backend/src/memory_agent/   FastAPI、Agent Runtime、工具、记忆与任务队列
 backend/migrations/         Alembic 数据库迁移
-frontend/src/               Vue 整理、复习与提醒工作台
+frontend/src/               微信小程序风格的移动 H5 与公开演示
 miniprogram/                原生微信小程序客户端
 project.config.json         微信开发者工具项目配置
 .agents/skills/             Agent 只读 Skills

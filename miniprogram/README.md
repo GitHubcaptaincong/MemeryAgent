@@ -1,6 +1,6 @@
 # Memory Agent 微信小程序客户端
 
-这是原生微信小程序客户端。现有 `frontend/` Vue 工作台仍然保留，便于桌面调试；两端调用同一套 FastAPI 接口。
+这是原生微信小程序客户端。`frontend/` 只保留同一信息架构的移动 H5 和 GitHub Pages 公开演示；两端调用同一套 FastAPI 接口。
 
 ## 导入微信开发者工具
 
@@ -64,7 +64,7 @@ X-WX-SERVICE: 你的服务名称
 
 1. 确认小程序 AppID 与该云托管环境属于同一微信账号或已正确关联；
 2. 在开发者工具中打开“调试器 -> Network”；
-3. 进入“复习”页面，应能成功请求 `/api/v1/reviews/queue`；
+3. 进入“复习”页面，应能成功请求 `/api/v1/review/queue`；
 4. 若返回服务不存在，核对 `cloudService`；若提示环境错误，核对 `cloudEnv`；若返回 5xx，查看云托管容器日志和 `/api/v1/ready`。
 
 ### 公网 HTTPS 调用（备选）

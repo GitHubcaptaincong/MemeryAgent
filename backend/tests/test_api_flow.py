@@ -15,6 +15,14 @@ from memory_agent.models import (
 )
 
 
+def test_readiness_checks_database_connection() -> None:
+    with TestClient(app) as client:
+        response = client.get("/api/v1/ready")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ready"}
+
+
 def test_source_to_confirmed_draft_and_approved_memory() -> None:
     with TestClient(app) as client:
         source_response = client.post(
@@ -65,6 +73,10 @@ def test_source_to_confirmed_draft_and_approved_memory() -> None:
         assert confirm_response.status_code == 200, confirm_response.text
         assert confirm_response.json()["status"] == "confirmed"
         assert client.get(f"/api/v1/runs/{run_id}").json()["state"] == "completed"
+        confirmed_events = client.get(f"/api/v1/runs/{run_id}/events").json()
+        assert confirmed_events[-1]["payload"]["state"] == "completed"
+        assert any(event["event_type"] == "review.cards_created" for event in confirmed_events)
+        assert any(event["event_type"] == "memory.candidate_created" for event in confirmed_events)
 
         review_queue = client.get("/api/v1/review/queue").json()
         assert len(review_queue) == len(draft["units"])

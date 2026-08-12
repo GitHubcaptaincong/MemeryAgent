@@ -24,3 +24,27 @@ def test_explicit_psycopg3_url_is_unchanged() -> None:
     database_url = "postgresql+psycopg://demo:secret@example.neon.tech/memory?sslmode=require"
 
     assert Settings(database_url=database_url).database_url == database_url
+
+
+def test_model_base_url_is_normalized() -> None:
+    settings = Settings(model_base_url=" https://proxy.example.test/v1/ ")
+
+    assert settings.model_base_url == "https://proxy.example.test/v1"
+
+
+def test_model_base_url_requires_v1_path() -> None:
+    try:
+        Settings(model_base_url="https://proxy.example.test")
+    except ValueError as exc:
+        assert "must end with /v1" in str(exc)
+    else:
+        raise AssertionError("missing /v1 must fail configuration validation")
+
+
+def test_model_base_url_rejects_pasted_punctuation() -> None:
+    try:
+        Settings(model_base_url="https://proxy.example.test/v1，")
+    except ValueError as exc:
+        assert "contains punctuation" in str(exc)
+    else:
+        raise AssertionError("pasted punctuation must fail configuration validation")
