@@ -1,0 +1,39 @@
+{
+  "pages": [
+    "pages/capture/capture",
+    "pages/review/review",
+    "pages/reminders/reminders"
+  ],
+  "window": {
+    "navigationBarBackgroundColor": "#F2F2F7",
+    "navigationBarTextStyle": "black",
+    "navigationBarTitleText": "Memory Agent",
+    "backgroundColor": "#F2F2F7",
+    "backgroundTextStyle": "dark"
+  },
+  "tabBar": {
+    "custom": true,
+    "color": "#8E8E93",
+    "selectedColor": "#007AFF",
+    "backgroundColor": "#FAFAFA",
+    "borderStyle": "black",
+    "position": "bottom",
+    "list": [
+      {
+        "pagePath": "pages/capture/capture",
+        "text": "整理"
+      },
+      {
+        "pagePath": "pages/review/review",
+        "text": "复习"
+      },
+      {
+        "pagePath": "pages/reminders/reminders",
+        "text": "提醒"
+      }
+    ]
+  },
+  "style": "v2",
+  "sitemapLocation": "sitemap.json",
+  "lazyCodeLoading": "requiredComponents"
+}

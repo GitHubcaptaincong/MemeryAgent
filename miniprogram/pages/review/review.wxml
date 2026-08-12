@@ -1,0 +1,90 @@
+<view class="page-shell review-page">
+  <view class="large-title review-title">
+    <view>
+      <text class="large-title__eyebrow">ACTIVE RECALL</text>
+      <text class="large-title__heading">先讲出来。</text>
+      <text class="large-title__copy">不要先看答案。用自己的话说一遍，再检查遗漏。</text>
+    </view>
+    <view class="due-badge"><text>{{overview.due_count}}</text><text>待复习</text></view>
+  </view>
+
+  <view wx:if="{{error}}" class="error-banner">{{error}}</view>
+  <view wx:if="{{lastScheduleText}}" class="success-banner">✓ {{lastScheduleText}}</view>
+
+  <view wx:if="{{loading}}" class="ios-card loading-card">
+    <view class="loading-dot"></view><text>正在同步复习队列</text>
+  </view>
+
+  <view wx:elif="{{!queue.length}}" class="ios-card empty-state">
+    <view class="empty-state__icon">✓</view>
+    <text class="empty-state__title">今天已经清空</text>
+    <text class="empty-state__copy">新确认的知识会自动出现在这里；完成自评后，系统会安排下次复习。</text>
+    <text wx:if="{{overview.next_due_at}}" class="empty-state__next">下一次复习：{{overview.next_due_label}}</text>
+    <button class="ios-button ios-button--plain empty-action" bindtap="goToCapture">记录新内容</button>
+  </view>
+
+  <block wx:else>
+    <scroll-view class="queue-strip" scroll-x="{{true}}" enhanced="{{true}}" show-scrollbar="{{false}}">
+      <view class="queue-strip__inner">
+        <view wx:for="{{queue}}" wx:key="id" class="queue-chip {{activeIndex === index ? 'queue-chip--active' : ''}}" data-index="{{index}}" bindtap="selectCard">
+          <text>{{index + 1}}</text>
+          <view><text>{{item.title}}</text><text>第 {{item.review_count + 1}} 次</text></view>
+        </view>
+      </view>
+    </scroll-view>
+
+    <view wx:if="{{activeCard}}" class="ios-card question-card card-padding">
+      <view class="question-meta"><text>OPEN QUESTION</text><text>{{activeCard.source_title}}</text></view>
+      <text class="question-title">{{activeCard.question}}</text>
+      <text class="question-goal">目标：{{activeCard.learning_goal}}</text>
+
+      <view wx:if="{{!answerResult}}">
+        <button wx:if="{{activeCard.hints.length}}" class="hint-button" bindtap="toggleHints">{{hintsVisible ? '收起提示' : '需要一点提示？'}}</button>
+        <view wx:if="{{hintsVisible}}" class="hint-box">
+          <view wx:for="{{activeCard.hints}}" wx:key="*this"><text>{{index + 1}}</text><text>{{item}}</text></view>
+        </view>
+        <view class="answer-editor">
+          <textarea value="{{answer}}" maxlength="3000" auto-height="{{false}}" placeholder="把你记得的机制、原因或步骤讲出来……" bindinput="onAnswerInput"></textarea>
+          <text>{{answer.length}} 字</text>
+        </view>
+        <button class="ios-button" disabled="{{busy || !answer}}" bindtap="submitAnswer">{{busy ? '正在保存…' : '提交回答'}}</button>
+      </view>
+    </view>
+
+    <block wx:if="{{answerResult}}">
+      <text class="section-label">对照答案</text>
+      <view class="ios-card compare-card">
+        <view class="compare-section">
+          <text class="compare-label">你的回答</text>
+          <text class="compare-copy">{{answerResult.answer}}</text>
+        </view>
+        <view class="hairline"></view>
+        <view class="compare-section">
+          <text class="compare-label blue">答案要点</text>
+          <view wx:for="{{answerResult.answer_key}}" wx:key="*this" class="answer-point"><text>✓</text><text>{{item}}</text></view>
+        </view>
+        <view wx:if="{{answerResult.evidence.length}}" class="evidence-card"><text>原文证据</text><text>“{{answerResult.evidence[0].quote}}”</text></view>
+      </view>
+
+      <text class="section-label">你的最终判断</text>
+      <view class="rating-intro"><text>掌握得怎么样？</text><text>当前由你最终评分，AI 不会覆盖这个选择。</text></view>
+      <view class="rating-grid">
+        <button wx:for="{{ratings}}" wx:key="value" class="rating-button rating-button--{{item.tone}}" disabled="{{busy}}" data-rating="{{item.value}}" bindtap="rateAnswer">
+          <text>{{item.value}}</text><text>{{item.label}}</text><text>{{item.hint}}</text>
+        </button>
+      </view>
+    </block>
+
+    <view class="session-footer">本次已完成 {{sessionCount}} 题</view>
+  </block>
+
+  <view wx:if="{{history.length}}" class="history-section">
+    <view class="history-section__heading"><view><text>RECENT REVIEWS</text><text>最近复习</text></view><text>最近 {{history.length}} 条</text></view>
+    <view class="ios-card history-card">
+      <view wx:for="{{history}}" wx:key="id" class="history-item">
+        <view><text>{{item.title}}</text><text>{{item.source_title}} · {{item.rating === 1 ? '忘记了' : item.rating === 2 ? '有点难' : item.rating === 3 ? '掌握了' : '很轻松'}}</text></view>
+        <text>下次 {{item.next_due_label}}</text>
+      </view>
+    </view>
+  </view>
+</view>

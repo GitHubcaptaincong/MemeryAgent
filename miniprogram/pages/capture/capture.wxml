@@ -1,0 +1,100 @@
+<view class="page-shell capture-page">
+  <view class="large-title">
+    <text class="large-title__eyebrow">QUICK CAPTURE</text>
+    <text class="large-title__heading">今天想记住什么？</text>
+    <text class="large-title__copy">写下来就可以离开。原文会先保存，Agent 在后台把它整理成可练习的知识。</text>
+  </view>
+
+  <view wx:if="{{error}}" class="error-banner">{{error}}</view>
+
+  <view wx:if="{{!draft}}" class="ios-card capture-form">
+    <view class="field-row compact-field">
+      <text class="field-label">标题</text>
+      <input class="ios-input" value="{{title}}" maxlength="300" placeholder="快速记录" bindinput="onTitleInput" />
+    </view>
+    <view class="hairline"></view>
+    <view class="field-row compact-field">
+      <text class="field-label">学习目标</text>
+      <input class="ios-input" value="{{learningGoal}}" maxlength="500" placeholder="可选，AI 会自动整理" bindinput="onGoalInput" />
+    </view>
+    <view class="hairline"></view>
+    <view class="field-row content-field">
+      <textarea class="ios-textarea" value="{{content}}" maxlength="10000" placeholder="菜谱、知识点、文章摘录，或者刚想到的一件事……" bindinput="onContentInput"></textarea>
+      <text class="character-count">{{charCount}} / 10,000</text>
+    </view>
+    <view class="hairline"></view>
+    <view class="switch-setting">
+      <view><text class="setting-title">允许外部检索</text><text class="setting-copy">默认关闭，当前后端尚未接入搜索工具</text></view>
+      <switch checked="{{webAccessAllowed}}" color="#34C759" bindchange="onWebAccessChange" />
+    </view>
+    <view class="form-action">
+      <button class="ios-button" disabled="{{busy || !content}}" bindtap="submitContent">{{busy ? '正在整理…' : '保存并开始整理'}}</button>
+    </view>
+  </view>
+
+  <view wx:if="{{sourceSaved}}" class="ios-card save-receipt">
+    <view class="receipt-icon">✓</view>
+    <view class="receipt-copy"><text>原文已保存</text><text>{{sourceSaved.char_count}} 字 · {{sourceSaved.saveMs}} ms</text></view>
+    <text class="receipt-status">AI 整理不会阻塞这条记录</text>
+  </view>
+
+  <view wx:if="{{busy || run}}" class="ios-card agent-card">
+    <view class="agent-head">
+      <view class="agent-orb {{busy ? 'agent-orb--active' : ''}}"><view></view></view>
+      <view class="agent-copy"><text class="agent-kicker">AGENT ACTIVITY</text><text class="agent-action">{{currentActivity}}</text><text class="agent-meta">{{runStateLabel}} · 已用时 {{elapsedText}}</text></view>
+    </view>
+    <view class="progress-track"><view class="progress-fill" style="width: {{progress}}%;"></view></view>
+    <view wx:if="{{events.length}}" class="event-list">
+      <view wx:for="{{events}}" wx:key="id" class="event-row">
+        <text class="event-index">{{item.seq}}</text>
+        <view><text class="event-title">{{item.label}}</text><text class="event-time">{{item.clock}} · {{item.event_type}}</text></view>
+      </view>
+    </view>
+  </view>
+
+  <block wx:if="{{draft}}">
+    <view class="draft-heading">
+      <view><text class="section-kicker">KNOWLEDGE DRAFT</text><text class="draft-title">整理好了，先快速看一遍</text></view>
+      <text class="unit-count">{{draft.units.length}} 张</text>
+    </view>
+    <view class="draft-summary">{{draft.agent_summary.overview}}</view>
+
+    <view wx:for="{{draft.units}}" wx:key="id" class="ios-card unit-card">
+      <view class="unit-head" data-id="{{item.id}}" bindtap="toggleUnit">
+        <view class="unit-number">{{item.position}}</view>
+        <view class="unit-heading"><text>{{item.title}}</text><text>{{item.learning_objective}}</text></view>
+        <text class="disclosure">{{expandedUnitId === item.id ? '⌃' : '⌄'}}</text>
+      </view>
+      <view wx:if="{{expandedUnitId === item.id}}" class="unit-detail">
+        <text class="unit-explanation">{{item.explanation}}</text>
+        <view class="question-box"><text>复习时会问</text><text>{{item.question}}</text></view>
+        <view wx:if="{{item.key_points.length}}" class="key-points">
+          <text class="detail-label">关键点</text>
+          <view wx:for="{{item.key_points}}" wx:for-item="point" wx:key="*this" class="bullet-row"><text>•</text><text>{{point}}</text></view>
+        </view>
+        <view wx:if="{{item.evidence.length}}" class="evidence-quote">“{{item.evidence[0].quote}}”</view>
+      </view>
+    </view>
+
+    <button wx:if="{{draft.status !== 'confirmed'}}" class="ios-button confirm-button" disabled="{{busy}}" bindtap="confirmDraft">确认并加入复习</button>
+    <view wx:else class="confirmed-actions ios-card card-padding">
+      <text class="confirmed-title">✓ 已加入复习队列</text>
+      <text class="confirmed-copy">这些问题现在可以在“复习”页开始练习。</text>
+      <button class="ios-button" bindtap="goToReview">开始第一次复习</button>
+      <button class="text-button" bindtap="resetCapture">继续记录新内容</button>
+    </view>
+  </block>
+
+  <block wx:if="{{memoryCandidates.length}}">
+    <text class="section-label">长期记忆审批</text>
+    <view wx:for="{{memoryCandidates}}" wx:key="id" class="ios-card memory-card card-padding">
+      <text class="memory-kind">{{item.kind}}</text>
+      <text class="memory-content">{{item.content}}</text>
+      <text class="memory-reason">{{item.rationale}}</text>
+      <view class="memory-actions">
+        <button class="ios-button ios-button--danger" data-id="{{item.id}}" data-decision="reject" bindtap="decideMemory">不保存</button>
+        <button class="ios-button ios-button--plain" data-id="{{item.id}}" data-decision="approve" bindtap="decideMemory">批准写入</button>
+      </view>
+    </view>
+  </block>
+</view>

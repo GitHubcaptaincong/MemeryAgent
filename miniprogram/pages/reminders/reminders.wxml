@@ -1,0 +1,71 @@
+<view class="page-shell reminders-page">
+  <view class="large-title">
+    <text class="large-title__eyebrow">REVIEW RHYTHM</text>
+    <text class="large-title__heading">按你的节奏来。</text>
+    <text class="large-title__copy">先控制每天什么时候复习、一次出现多少内容，避免提醒变成负担。</text>
+  </view>
+
+  <view wx:if="{{error}}" class="error-banner">{{error}}</view>
+  <view wx:if="{{saved}}" class="success-banner">✓ 提醒偏好已经保存</view>
+
+  <view wx:if="{{loading}}" class="ios-card loading-settings">正在读取设置…</view>
+
+  <block wx:else>
+    <text class="section-label">每日提醒</text>
+    <view class="ios-card settings-group">
+      <view class="setting-row">
+        <view class="setting-copy"><text>启用复习提醒</text><text>保留提醒时间与队列设置</text></view>
+        <switch checked="{{form.enabled}}" color="#34C759" bindchange="onEnabledChange" />
+      </view>
+      <view class="hairline"></view>
+      <picker mode="time" value="{{form.preferred_time}}" disabled="{{!form.enabled}}" bindchange="onTimeChange">
+        <view class="setting-row {{!form.enabled ? 'setting-row--disabled' : ''}}">
+          <view class="setting-copy"><text>提醒时间</text><text>每天优先开始复习的时间</text></view>
+          <view class="setting-value"><text>{{form.preferred_time}}</text><text>›</text></view>
+        </view>
+      </picker>
+      <view class="hairline"></view>
+      <view class="setting-row {{!form.enabled ? 'setting-row--disabled' : ''}}">
+        <view class="setting-copy"><text>每日上限</text><text>避免一次出现太多任务</text></view>
+        <view class="stepper">
+          <button disabled="{{!form.enabled || form.daily_limit <= 1}}" data-delta="-1" bindtap="changeLimit">−</button>
+          <text>{{form.daily_limit}}</text>
+          <button disabled="{{!form.enabled || form.daily_limit >= 100}}" data-delta="1" bindtap="changeLimit">＋</button>
+        </view>
+      </view>
+      <view class="hairline"></view>
+      <view class="setting-row {{!form.enabled ? 'setting-row--disabled' : ''}}">
+        <view class="setting-copy"><text>包含逾期内容</text><text>优先补回已经错过的复习</text></view>
+        <switch checked="{{form.overdue_enabled}}" disabled="{{!form.enabled}}" color="#34C759" bindchange="onOverdueChange" />
+      </view>
+    </view>
+
+    <text class="section-label">地区</text>
+    <view class="ios-card settings-group">
+      <view class="setting-row">
+        <view class="setting-copy"><text>时区</text><text>用于计算每日提醒时间</text></view>
+        <text class="timezone">{{form.timezone}}</text>
+      </view>
+    </view>
+
+    <button class="ios-button save-button" disabled="{{saving}}" bindtap="savePreferences">{{saving ? '正在保存…' : '保存设置'}}</button>
+
+    <text class="section-label">发送能力</text>
+    <view class="ios-card delivery-card">
+      <view class="delivery-row delivery-row--done">
+        <view class="delivery-icon">✓</view>
+        <view><text>到期队列与偏好</text><text>已实现，重新打开小程序即可看到到期内容。</text></view>
+      </view>
+      <view class="hairline delivery-line"></view>
+      <view class="delivery-row">
+        <view class="delivery-icon">2</view>
+        <view><text>微信订阅消息</text><text>尚未接入。下一阶段需要消息模板、用户授权和定时发送任务。</text></view>
+      </view>
+    </view>
+
+    <view class="scope-card">
+      <text>当前边界</text>
+      <text>关闭小程序后暂时不会主动弹出提醒；该页面保存的是下一阶段接入订阅消息时需要的用户偏好。</text>
+    </view>
+  </block>
+</view>

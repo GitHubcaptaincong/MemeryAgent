@@ -1,0 +1,90 @@
+services:
+  postgres:
+    image: pgvector/pgvector:0.8.5-pg17
+    environment:
+      POSTGRES_DB: memory_agent
+      POSTGRES_USER: memory_agent
+      POSTGRES_PASSWORD: memory_agent
+    ports:
+      - "5432:5432"
+    volumes:
+      - memory_agent_pg:/var/lib/postgresql/data
+      - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/10-extensions.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U memory_agent -d memory_agent"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+
+  api:
+    image: memory-agent-backend:local
+    build:
+      context: ./backend
+    environment:
+      APP_ENV: development
+      APP_DATABASE_URL: postgresql+psycopg://memory_agent:memory_agent@postgres:5432/memory_agent
+      APP_MODEL_PROVIDER: cli_proxy
+      APP_MODEL_BASE_URL: http://host.docker.internal:8317/v1
+      APP_MODEL_API_KEY: ${CLI_PROXY_API_KEY:-}
+      APP_MODEL_NAME: ${CLI_PROXY_MODEL:-gpt-5.4-mini}
+      APP_MODEL_REASONING_EFFORT: ${CLI_PROXY_REASONING_EFFORT:-low}
+      APP_MODEL_TIMEOUT_SECONDS: "180"
+      APP_MODEL_MAX_OUTPUT_TOKENS: "8000"
+      APP_MODEL_QUICK_SOURCE_MAX_CHARS: ${CLI_PROXY_QUICK_SOURCE_MAX_CHARS:-600}
+      APP_MODEL_QUICK_REASONING_EFFORT: ${CLI_PROXY_QUICK_REASONING_EFFORT:-none}
+      APP_MODEL_QUICK_MAX_OUTPUT_TOKENS: ${CLI_PROXY_QUICK_MAX_OUTPUT_TOKENS:-2500}
+      APP_AGENT_MAX_SECONDS: "600"
+      APP_AUTO_CREATE_SCHEMA: "false"
+      APP_INLINE_WORKER: "false"
+      APP_SKILL_ROOT: /skills
+    command: ["/bin/sh", "-c", "alembic upgrade head && uvicorn memory_agent.main:app --host 0.0.0.0 --port 8000"]
+    volumes:
+      - ./.agents/skills:/skills:ro
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+
+  worker:
+    image: memory-agent-backend:local
+    environment:
+      APP_ENV: development
+      APP_DATABASE_URL: postgresql+psycopg://memory_agent:memory_agent@postgres:5432/memory_agent
+      APP_MODEL_PROVIDER: cli_proxy
+      APP_MODEL_BASE_URL: http://host.docker.internal:8317/v1
+      APP_MODEL_API_KEY: ${CLI_PROXY_API_KEY:-}
+      APP_MODEL_NAME: ${CLI_PROXY_MODEL:-gpt-5.4-mini}
+      APP_MODEL_REASONING_EFFORT: ${CLI_PROXY_REASONING_EFFORT:-low}
+      APP_MODEL_TIMEOUT_SECONDS: "180"
+      APP_MODEL_MAX_OUTPUT_TOKENS: "8000"
+      APP_MODEL_QUICK_SOURCE_MAX_CHARS: ${CLI_PROXY_QUICK_SOURCE_MAX_CHARS:-600}
+      APP_MODEL_QUICK_REASONING_EFFORT: ${CLI_PROXY_QUICK_REASONING_EFFORT:-none}
+      APP_MODEL_QUICK_MAX_OUTPUT_TOKENS: ${CLI_PROXY_QUICK_MAX_OUTPUT_TOKENS:-2500}
+      APP_AGENT_MAX_SECONDS: "600"
+      APP_AUTO_CREATE_SCHEMA: "false"
+      APP_INLINE_WORKER: "false"
+      APP_SKILL_ROOT: /skills
+    command: ["memory-agent-worker"]
+    volumes:
+      - ./.agents/skills:/skills:ro
+    depends_on:
+      api:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  memory_agent_pg:

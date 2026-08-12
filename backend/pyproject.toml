@@ -1,0 +1,42 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "memory-agent-backend"
+version = "0.1.0"
+description = "Stage-one content generation agent and memory foundation"
+requires-python = ">=3.12,<3.15"
+dependencies = [
+  "alembic==1.18.5",
+  "fastapi==0.139.2",
+  "fsrs==6.3.1",
+  "httpx2==2.7.0",
+  "pgvector==0.5.0",
+  "psycopg[binary,pool]==3.3.4",
+  "pydantic-settings==2.14.2",
+  "sqlalchemy==2.0.51",
+  "uvicorn[standard]==0.52.1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest==8.4.2",
+  "pytest-cov==7.1.0",
+]
+
+[project.scripts]
+memory-agent-api = "memory_agent.main:run"
+memory-agent-worker = "memory_agent.worker:run"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/memory_agent"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["memory_agent"]
+branch = true

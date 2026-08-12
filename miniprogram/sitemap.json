@@ -1,0 +1,9 @@
+{
+  "desc": "Memory Agent 是个人学习工具，暂不允许微信索引页面。",
+  "rules": [
+    {
+      "action": "disallow",
+      "page": "*"
+    }
+  ]
+}
