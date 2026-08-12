@@ -17,11 +17,12 @@ async def lifespan(_app: FastAPI):
     settings = get_settings()
     if settings.auto_create_schema:
         create_schema_for_development()
-    session = SessionLocal()
-    try:
-        ensure_local_identity(session, settings)
-    finally:
-        session.close()
+    if settings.auth_mode == "local":
+        session = SessionLocal()
+        try:
+            ensure_local_identity(session, settings)
+        finally:
+            session.close()
     yield
 
 

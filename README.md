@@ -108,6 +108,9 @@ npm run dev
 
 ```text
 APP_DATABASE_URL=postgresql+psycopg://<user>:<password>@<host>:5432/<database>
+APP_AUTH_MODE=wechat
+APP_WECHAT_APP_ID=<your-mini-program-app-id>
+APP_WECHAT_CLAIM_LOCAL_USER=false
 APP_MODEL_PROVIDER=cli_proxy
 APP_MODEL_BASE_URL=https://<cloud-accessible-model-service>/v1
 APP_MODEL_API_KEY=<secret>
@@ -120,6 +123,8 @@ APP_SKILL_ROOT=/skills
 当前本机 CLIProxy 地址不能从 CloudBase 容器访问。云端必须使用公网或同 VPC 可访问的模型服务地址；只想先验证部署时，可以临时设置 `APP_MODEL_PROVIDER=fake`，但这不会调用真实模型。
 
 根目录 Dockerfile 会在启动时执行 `alembic upgrade head`，因此目标 PostgreSQL 必须在容器启动前可连接。`frontend/` 和 `miniprogram/` 不需要由这个容器提供；小程序只调用云托管暴露的 FastAPI 地址。
+
+微信云托管模式下，后端读取 `wx.cloud.callContainer` 自动注入的 `X-WX-OPENID` 与 `X-WX-APPID`，映射为内部用户 UUID。已有单用户数据的首次认领和防误领步骤见 [微信 OpenID 用户隔离](./docs/wechat-user-isolation.md)。本地开发继续使用默认的 `APP_AUTH_MODE=local`。
 
 ## GitHub Pages 公开演示与 Neon
 

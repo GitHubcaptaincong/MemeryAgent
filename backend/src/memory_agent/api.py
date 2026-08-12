@@ -11,7 +11,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
-from memory_agent.bootstrap import ensure_local_identity
+from memory_agent.auth import IdentityContext, get_current_identity
 from memory_agent.config import Settings, get_settings
 from memory_agent.database import SessionLocal, get_session
 from memory_agent.models import (
@@ -64,8 +64,8 @@ from memory_agent.services import (
 router = APIRouter(prefix="/api/v1")
 
 
-def _identity(session: Session, settings: Settings):
-    return ensure_local_identity(session, settings)
+def _identity(identity: IdentityContext):
+    return identity.user, identity.profile
 
 
 def _run_for_user(session: Session, run_id: UUID, user_id: UUID) -> AgentRun:
@@ -97,9 +97,9 @@ def ready(session: Session = Depends(get_session)) -> dict[str, str]:
 def get_review_queue(
     limit: int = Query(default=20, ge=1, le=100),
     session: Session = Depends(get_session),
-    settings: Settings = Depends(get_settings),
+    identity: IdentityContext = Depends(get_current_identity),
 ) -> list[ReviewCardRead]:
-    user, _ = _identity(session, settings)
+    user, _ = _identity(identity)
     return [
         ReviewCardRead.model_validate(item)
         for item in list_due_review_cards(session, user_id=user.id, limit=limit)
@@ -109,9 +109,9 @@ def get_review_queue(
 @router.get("/review/overview", response_model=ReviewOverviewRead)
 def get_review_overview_route(
     session: Session = Depends(get_session),
-    settings: Settings = Depends(get_settings),
+    identity: IdentityContext = Depends(get_current_identity),
 ) -> ReviewOverviewRead:
-    user, _ = _identity(session, settings)
+    user, _ = _identity(identity)
     return ReviewOverviewRead.model_validate(
         get_review_overview(session, user_id=user.id)
     )
@@ -121,9 +121,9 @@ def get_review_overview_route(
 def get_review_history(
     limit: int = Query(default=10, ge=1, le=100),
     session: Session = Depends(get_session),
-    settings: Settings = Depends(get_settings),
+    identity: IdentityContext = Depends(get_current_identity),
 ) -> list[ReviewHistoryRead]:
-    user, _ = _identity(session, settings)
+    user, _ = _identity(identity)
     return [
         ReviewHistoryRead.model_validate(item)
         for item in list_review_history(session, user_id=user.id, limit=limit)
@@ -139,9 +139,9 @@ def post_review_answer(
     card_id: UUID,
     data: ReviewAnswerCreate,
     session: Session = Depends(get_session),
-    settings: Settings = Depends(get_settings),
+    identity: IdentityContext = Depends(get_current_identity),
 ) -> ReviewAnswerRead:
-    user, _ = _identity(session, settings)
+    user, _ = _identity(identity)
     try:
         result = submit_review_answer(
             session,
@@ -162,9 +162,9 @@ def post_review_rating(
     card_id: UUID,
     data: ReviewRatingCreate,
     session: Session = Depends(get_session),
-    settings: Settings = Depends(get_settings),
+    identity: IdentityContext = Depends(get_current_identity),
 ) -> ReviewResultRead:
-    user, _ = _identity(session, settings)
+    user, _ = _identity(identity)
     try:
         result = rate_review_answer(
             session,
@@ -184,9 +184,9 @@ def post_review_rating(
 @router.get("/reminders/preferences", response_model=ReminderPreferenceRead)
 def get_reminder_settings(
     session: Session = Depends(get_session),
-    settings: Settings = Depends(get_settings),
+    identity: IdentityContext = Depends(get_current_identity),
 ) -> ReminderPreferenceRead:
-    user, _ = _identity(session, settings)
+    user, _ = _identity(identity)
     return ReminderPreferenceRead.model_validate(
         get_reminder_preference(session, user_id=user.id)
     )
@@ -196,9 +196,9 @@ def get_reminder_settings(
 def put_reminder_settings(
     data: ReminderPreferenceUpdate,
     session: Session = Depends(get_session),
-    settings: Settings = Depends(get_settings),
+    identity: IdentityContext = Depends(get_current_identity),
 ) -> ReminderPreferenceRead:
-    user, _ = _identity(session, settings)
+    user, _ = _identity(identity)
     return ReminderPreferenceRead.model_validate(
         update_reminder_preference(
             session,
@@ -216,9 +216,9 @@ def put_reminder_settings(
 def post_source(
     data: SourceCreate,
     session: Session = Depends(get_session),
-    settings: Settings = Depends(get_settings),
+    identity: IdentityContext = Depends(get_current_identity),
 ) -> SourceRead:
-    user, _profile = _identity(session, settings)
+    user, _profile = _identity(identity)
     source = create_source(session, user_id=user.id, data=data)
     return SourceRead.model_validate(source)
 
@@ -228,9 +228,10 @@ def post_run(
     data: RunCreate,
     background_tasks: BackgroundTasks,
     session: Session = Depends(get_session),
-    settings: Settings = Depends(get_settings),
+    identity: IdentityContext = Depends(get_current_identity),
 ) -> RunRead:
-    user, profile = _identity(session, settings)
+    user, profile = _identity(identity)
+    settings = identity.settings
     try:
         run, job, created = create_run(
             session,
@@ -251,9 +252,9 @@ def post_run(
 def get_run(
     run_id: UUID,
     session: Session = Depends(get_session),
-    settings: Settings = Depends(get_settings),
+    identity: IdentityContext = Depends(get_current_identity),
 ) -> RunRead:
-    user, _ = _identity(session, settings)
+    user, _ = _identity(identity)
     return RunRead.model_validate(_run_for_user(session, run_id, user.id))
 
 
@@ -261,9 +262,9 @@ def get_run(
 def cancel_run(
     run_id: UUID,
     session: Session = Depends(get_session),
-    settings: Settings = Depends(get_settings),
+    identity: IdentityContext = Depends(get_current_identity),
 ) -> RunRead:
-    user, _ = _identity(session, settings)
+    user, _ = _identity(identity)
     run = _run_for_user(session, run_id, user.id)
     if run.state not in TERMINAL_RUN_STATES and run.state != RunState.AWAITING_USER.value:
         run.cancel_requested = True
@@ -276,9 +277,9 @@ def list_events(
     run_id: UUID,
     after_seq: int = Query(default=0, ge=0),
     session: Session = Depends(get_session),
-    settings: Settings = Depends(get_settings),
+    identity: IdentityContext = Depends(get_current_identity),
 ) -> list[EventRead]:
-    user, _ = _identity(session, settings)
+    user, _ = _identity(identity)
     _run_for_user(session, run_id, user.id)
     events = session.scalars(
         select(AgentEvent)
@@ -376,9 +377,9 @@ def stream_events(
     run_id: UUID,
     after_seq: int = Query(default=0, ge=0),
     session: Session = Depends(get_session),
-    settings: Settings = Depends(get_settings),
+    identity: IdentityContext = Depends(get_current_identity),
 ) -> StreamingResponse:
-    user, _ = _identity(session, settings)
+    user, _ = _identity(identity)
     _run_for_user(session, run_id, user.id)
     return StreamingResponse(
         _event_stream(run_id, user.id, after_seq),
@@ -391,9 +392,9 @@ def stream_events(
 def get_run_draft(
     run_id: UUID,
     session: Session = Depends(get_session),
-    settings: Settings = Depends(get_settings),
+    identity: IdentityContext = Depends(get_current_identity),
 ) -> DraftRead:
-    user, _ = _identity(session, settings)
+    user, _ = _identity(identity)
     _run_for_user(session, run_id, user.id)
     draft_id = session.scalar(
         select(KnowledgeDraft.id)
@@ -412,9 +413,9 @@ def get_run_draft(
 def post_confirm_draft(
     draft_id: UUID,
     session: Session = Depends(get_session),
-    settings: Settings = Depends(get_settings),
+    identity: IdentityContext = Depends(get_current_identity),
 ) -> DraftRead:
-    user, _ = _identity(session, settings)
+    user, _ = _identity(identity)
     try:
         draft, _candidate = confirm_draft(session, draft_id=draft_id, user_id=user.id)
     except LookupError as exc:
@@ -428,9 +429,9 @@ def post_confirm_draft(
 def list_memory_candidates(
     candidate_status: str = Query(default="pending", alias="status"),
     session: Session = Depends(get_session),
-    settings: Settings = Depends(get_settings),
+    identity: IdentityContext = Depends(get_current_identity),
 ) -> list[MemoryCandidateRead]:
-    user, _ = _identity(session, settings)
+    user, _ = _identity(identity)
     candidates = session.scalars(
         select(MemoryCandidate)
         .where(
@@ -447,9 +448,9 @@ def post_memory_decision(
     candidate_id: UUID,
     data: MemoryDecision,
     session: Session = Depends(get_session),
-    settings: Settings = Depends(get_settings),
+    identity: IdentityContext = Depends(get_current_identity),
 ) -> MemoryCandidateRead:
-    user, _ = _identity(session, settings)
+    user, _ = _identity(identity)
     try:
         candidate = decide_memory_candidate(
             session,

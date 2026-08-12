@@ -76,6 +76,31 @@ class User(Base):
     )
 
     profiles: Mapped[list[AgentProfile]] = relationship(back_populates="user")
+    wechat_identity: Mapped[WechatIdentity | None] = relationship(
+        back_populates="user",
+        uselist=False,
+    )
+
+
+class WechatIdentity(Base):
+    __tablename__ = "wechat_identities"
+    __table_args__ = (
+        UniqueConstraint("app_id", "openid", name="uq_wechat_identity_app_openid"),
+        UniqueConstraint("user_id", name="uq_wechat_identity_user"),
+        Index("ix_wechat_identities_unionid", "unionid"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    app_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    openid: Mapped[str] = mapped_column(String(128), nullable=False)
+    unionid: Mapped[str | None] = mapped_column(String(128))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+    user: Mapped[User] = relationship(back_populates="wechat_identity")
 
 
 class AgentProfile(Base):

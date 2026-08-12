@@ -72,6 +72,9 @@ APP_DATABASE_URL=<Neon connection string>
 APP_AUTO_CREATE_SCHEMA=false
 APP_INLINE_WORKER=true
 APP_CORS_ORIGINS=https://githubcaptaincong.github.io
+APP_AUTH_MODE=wechat
+APP_WECHAT_APP_ID=<your-mini-program-app-id>
+APP_WECHAT_CLAIM_LOCAL_USER=false
 
 APP_MODEL_PROVIDER=cli_proxy
 APP_MODEL_BASE_URL=https://<current-cpolar-host>/v1
@@ -90,15 +93,17 @@ APP_SKILL_ROOT=/skills
 APP_CORS_ORIGINS=https://githubcaptaincong.github.io,https://example.com
 ```
 
-目前 GitHub Pages 是纯演示模式，不依赖这个 CORS 配置；当 H5 增加登录并切换到真实 API 后才会使用。
+目前 GitHub Pages 是纯演示模式，不依赖这个 CORS 配置；微信 OpenID 登录只保护小程序经 `wx.cloud.callContainer` 发出的请求。
 
 ## 4. 发布边界
 
 - GitHub Pages：可以长期公开，只有示例数据。
-- 微信小程序：在 OpenID 隔离完成前只供本人测试。
-- CloudBase API：在访客鉴权和限流完成前不要直接提供给陌生人写入。
+- 微信小程序：通过 OpenID 映射内部用户，业务数据按 `user_id` 隔离；首次认领旧数据后必须关闭一次性认领开关。
+- CloudBase API：用户接口要求微信身份 Header；健康检查和就绪检查仍公开供平台探活。上线给陌生人使用前仍应增加限流和内容安全控制。
 - 本机模型：本机离线不影响 GitHub Pages 演示；真实生成暂时不可用。
 - Neon：定期执行 `pg_dump` 保存可恢复备份，免费服务不代替项目自己的备份策略。
+
+完整身份切换步骤见 [微信 OpenID 用户隔离](./wechat-user-isolation.md)。
 
 ## 5. 本地复现公开构建
 

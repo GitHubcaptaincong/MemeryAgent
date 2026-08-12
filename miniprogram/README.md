@@ -32,7 +32,7 @@ apiBaseUrl: 'http://127.0.0.1:8000/api/v1'
 - 局域网调试时需换成电脑局域网地址。
 - `utils/api.js` 已接入 `wx.cloud.callContainer`。使用微信云托管时，推荐按下面的“云托管原生调用”配置；这条路径不经过 `wx.request`，不需要把云托管公网地址添加为 request 合法域名。
 - 不要把模型 Key、数据库密码、微信 AppSecret 写进 `config.js`；这些只应存在于后端环境变量或云端密钥配置。
-- 当前后端使用单一本地身份。正式多人使用前，应接入微信登录，以 OpenID 映射后端用户并增加数据隔离。
+- 云端设置 `APP_AUTH_MODE=wechat` 后，`wx.cloud.callContainer` 自动携带的 OpenID 会映射为后端内部用户，客户端不需要用户名、密码或手动调用 `wx.login`。本地后端仍可用 `APP_AUTH_MODE=local`。
 
 ### 云托管原生调用（推荐）
 
@@ -66,6 +66,9 @@ X-WX-SERVICE: 你的服务名称
 2. 在开发者工具中打开“调试器 -> Network”；
 3. 进入“复习”页面，应能成功请求 `/api/v1/review/queue`；
 4. 若返回服务不存在，核对 `cloudService`；若提示环境错误，核对 `cloudEnv`；若返回 5xx，查看云托管容器日志和 `/api/v1/ready`。
+5. 若用户接口返回 401，检查请求是否确实经过 `wx.cloud.callContainer`；若返回 403，检查 `APP_WECHAT_APP_ID` 是否与当前小程序 AppID 一致。
+
+首次把现有单用户数据绑定到你的微信身份时，按 [微信 OpenID 用户隔离](../docs/wechat-user-isolation.md) 操作，不要长期启用首次访问认领开关。
 
 ### 公网 HTTPS 调用（备选）
 

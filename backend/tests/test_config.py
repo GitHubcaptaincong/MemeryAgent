@@ -48,3 +48,26 @@ def test_model_base_url_rejects_pasted_punctuation() -> None:
         assert "contains punctuation" in str(exc)
     else:
         raise AssertionError("pasted punctuation must fail configuration validation")
+
+
+def test_wechat_auth_requires_expected_app_id() -> None:
+    try:
+        Settings(auth_mode="wechat")
+    except ValueError as exc:
+        assert "APP_WECHAT_APP_ID is required" in str(exc)
+    else:
+        raise AssertionError("wechat auth without an expected AppID must fail")
+
+
+def test_wechat_legacy_claim_modes_are_mutually_exclusive() -> None:
+    try:
+        Settings(
+            auth_mode="wechat",
+            wechat_app_id="wx1234567890abcdef",
+            wechat_claim_local_user=True,
+            wechat_legacy_owner_openid="owner_openid_123456",
+        )
+    except ValueError as exc:
+        assert "use either APP_WECHAT_CLAIM_LOCAL_USER" in str(exc)
+    else:
+        raise AssertionError("ambiguous legacy claim configuration must fail")

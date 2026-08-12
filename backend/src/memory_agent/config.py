@@ -4,7 +4,7 @@ from typing import Literal
 from urllib.parse import urlsplit
 from uuid import UUID
 
-from pydantic import Field, SecretStr, field_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -23,8 +23,12 @@ class Settings(BaseSettings):
     env: str = "development"
     database_url: str = "sqlite+pysqlite:///./memory_agent.db"
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
+    auth_mode: Literal["local", "wechat"] = "local"
     local_user_id: UUID = UUID("00000000-0000-0000-0000-000000000001")
     local_user_email: str = "local@memory-agent.test"
+    wechat_app_id: str | None = None
+    wechat_legacy_owner_openid: SecretStr | None = None
+    wechat_claim_local_user: bool = False
     model_provider: str = "fake"
     model_base_url: str = "http://127.0.0.1:8317/v1"
     model_api_key: SecretStr | None = None
@@ -74,6 +78,24 @@ class Settings(BaseSettings):
             raise ValueError("CLIProxy model base URL must end with /v1")
         return normalized
 
+    @field_validator("wechat_app_id", mode="before")
+    @classmethod
+    def normalize_wechat_app_id(cls, value: object) -> object:
+        if isinstance(value, str):
+            return value.strip() or None
+        return value
+
+    @model_validator(mode="after")
+    def validate_wechat_auth_settings(self) -> "Settings":
+        if self.auth_mode == "wechat" and not self.wechat_app_id:
+            raise ValueError("APP_WECHAT_APP_ID is required when APP_AUTH_MODE=wechat")
+        if self.wechat_claim_local_user and self.wechat_legacy_owner_openid:
+            raise ValueError(
+                "use either APP_WECHAT_CLAIM_LOCAL_USER or "
+                "APP_WECHAT_LEGACY_OWNER_OPENID, not both"
+            )
+        return self
+
     @property
     def is_sqlite(self) -> bool:
         return self.database_url.startswith("sqlite")
@@ -85,6 +107,14 @@ class Settings(BaseSettings):
     @property
     def model_api_key_value(self) -> str | None:
         return self.model_api_key.get_secret_value() if self.model_api_key else None
+
+    @property
+    def wechat_legacy_owner_openid_value(self) -> str | None:
+        return (
+            self.wechat_legacy_owner_openid.get_secret_value()
+            if self.wechat_legacy_owner_openid
+            else None
+        )
 
 
 @lru_cache
