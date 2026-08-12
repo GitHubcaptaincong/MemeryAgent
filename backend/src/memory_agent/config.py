@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Literal
 from uuid import UUID
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -44,6 +44,19 @@ class Settings(BaseSettings):
     inline_worker: bool = True
     worker_poll_seconds: float = Field(default=1.0, ge=0.1, le=60)
     skill_root: Path = WORKSPACE_ROOT / ".agents" / "skills"
+
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def use_psycopg3_for_postgresql(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        if value.startswith("postgres://"):
+            return value.replace("postgres://", "postgresql+psycopg://", 1)
+        if value.startswith("postgresql://"):
+            return value.replace("postgresql://", "postgresql+psycopg://", 1)
+        if value.startswith("postgresql+psycopg2://"):
+            return value.replace("postgresql+psycopg2://", "postgresql+psycopg://", 1)
+        return value
 
     @property
     def is_sqlite(self) -> bool:

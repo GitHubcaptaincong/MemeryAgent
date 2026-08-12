@@ -47,7 +47,7 @@ CLIProxy 的访问地址按运行位置区分：
 - 后端运行在 Docker 容器时使用 `http://host.docker.internal:8317/v1`，Compose 已内置该配置。
 - 当前默认模型是 `gpt-5.4-mini`；可通过 `.env` 中的 `CLI_PROXY_MODEL` 切换为 `gpt-5.4` 或 `gpt-5.5`。
 
-本机验证中，CLIProxy 在 `127.0.0.1` 和 `host.docker.internal` 可访问；最初提供的 `28.0.0.1` 地址返回了网关错误，因此没有写入默认配置。
+本机验证时请按运行位置选择上面的回环或 Docker 主机地址；不要把个人网络地址写入仓库。
 
 ```powershell
 docker compose up --build
@@ -60,6 +60,8 @@ docker compose up --build
 - API 健康检查：http://localhost:8000/api/v1/health
 
 微信小程序请在微信开发者工具中导入仓库根目录。配置与真机联调说明见 [miniprogram/README.md](./miniprogram/README.md)。
+
+公开仓库中的 `project.config.json` 使用 `touristappid`。首次导入后，请在微信开发者工具“详情 -> 基本信息”中填写自己的 AppID；开发者工具会将它保存到已被 Git 忽略的 `project.private.config.json`。
 
 停止服务但保留数据库：
 
