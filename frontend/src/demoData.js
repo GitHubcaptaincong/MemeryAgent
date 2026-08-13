@@ -102,4 +102,87 @@ export const publicDemo = {
       next_due_at: isoAfterMinutes(1440),
     },
   ],
+  answerEvaluation: {
+    status: 'completed',
+    suggested_rating: 3,
+    summary: '回答已说明“主动重建解释”的作用，但还可以更明确地指出卡顿、含糊和跳步是如何暴露理解缺口的。',
+    covered_points: [
+      {
+        point_index: 0,
+        point: '解释要求主动重建知识结构，而不只是识别熟悉内容',
+        evidence: '需要自己重新组织逻辑',
+      },
+    ],
+    missing_points: [
+      {
+        point_index: 1,
+        point: '卡顿、含糊和跳步会暴露理解不完整的位置',
+        suggestion: '补充说明：讲解时的卡顿和跳步是可观察的理解缺口信号。',
+      },
+    ],
+    confidence: 0.86,
+  },
+  dailyPlan: {
+    date: new Date(now).toISOString().slice(0, 10),
+    daily_limit: 6,
+    completed_today: 2,
+    remaining_capacity: 4,
+    due_now_count: 7,
+    overdue_backlog_count: 3,
+    must_do_count: 1,
+    planned_count: 2,
+    overflow_count: 5,
+    balance_status: 'overloaded',
+    planned_cards: [
+      { id: 'demo-card-1', title: '主动解释与知识盲区' },
+      { id: 'demo-card-2', title: '费曼学习闭环' },
+    ],
+    fsrs_schedule_changed: false,
+  },
+  insights: {
+    summary: {
+      active_card_count: 12,
+      due_count: 7,
+      reviewed_card_count: 9,
+      unreviewed_count: 3,
+      completed_in_period: 18,
+      self_rated_mastery_rate: 0.72,
+    },
+    weak_cards: [
+      { card_id: 'weak-1', title: '费曼学习闭环', source_title: '费曼学习法', weakness_score: 68, confidence: 'medium', reasons: ['最近 4 次复习中有 2 次评为 1 或 2'] },
+      { card_id: 'weak-2', title: '主动解释的诊断作用', source_title: '费曼学习法', weakness_score: 43, confidence: 'low', reasons: ['当前样本较少，仅作提示'] },
+    ],
+    trend: {
+      summary: { completed_count: 18, mastered_count: 13, struggle_count: 5, active_days: 5, current_streak: 3, self_rated_mastery_rate: 0.72 },
+      daily: [
+        { date: '2026-08-07', completed_count: 1, mastered_count: 1 },
+        { date: '2026-08-08', completed_count: 3, mastered_count: 2 },
+        { date: '2026-08-09', completed_count: 0, mastered_count: 0 },
+        { date: '2026-08-10', completed_count: 4, mastered_count: 3 },
+        { date: '2026-08-11', completed_count: 2, mastered_count: 1 },
+        { date: '2026-08-12', completed_count: 3, mastered_count: 2 },
+        { date: '2026-08-13', completed_count: 5, mastered_count: 4 },
+      ],
+    },
+    workload: {
+      daily_limit: 6,
+      carry_over_count: 2,
+      fsrs_schedule_changed: false,
+      daily: [
+        { date: '2026-08-13', capacity: 4, canonical_due_count: 7, recommended_count: 4 },
+        { date: '2026-08-14', capacity: 6, canonical_due_count: 2, recommended_count: 4 },
+        { date: '2026-08-15', capacity: 6, canonical_due_count: 8, recommended_count: 6 },
+        { date: '2026-08-16', capacity: 6, canonical_due_count: 1, recommended_count: 4 },
+        { date: '2026-08-17', capacity: 6, canonical_due_count: 5, recommended_count: 5 },
+        { date: '2026-08-18', capacity: 6, canonical_due_count: 3, recommended_count: 3 },
+        { date: '2026-08-19', capacity: 6, canonical_due_count: 2, recommended_count: 2 },
+      ],
+    },
+  },
+  subscriptionStatus: {
+    template_id: 'DEMO_TEMPLATE_ID',
+    available_grants: 1,
+    last_result: 'accept',
+    boundary: '微信一次性订阅：每次用户授权可发送一次。',
+  },
 }

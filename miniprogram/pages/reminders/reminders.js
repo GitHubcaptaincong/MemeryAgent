@@ -1,9 +1,18 @@
 const api = require('../../utils/api')
+const { idempotencyKey } = require('../../utils/ids')
+
+function sentAtLabel(value) {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  return `${date.getMonth() + 1} 月 ${date.getDate()} 日 ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
+}
 
 Page({
   data: {
     loading: true,
     saving: false,
+    subscribing: false,
     saved: false,
     error: '',
     form: {
@@ -11,7 +20,16 @@ Page({
       preferred_time: '20:00',
       daily_limit: 10,
       overdue_enabled: true,
+      ai_evaluation_enabled: true,
       timezone: 'Asia/Shanghai',
+    },
+    subscription: {
+      template_id: null,
+      delivery_enabled: false,
+      available_grants: 0,
+      last_delivery_status: null,
+      last_sent_at: null,
+      last_sent_label: '',
     },
   },
 
@@ -21,11 +39,22 @@ Page({
     this.loadPreferences()
   },
 
+  onPullDownRefresh() {
+    this.loadPreferences().finally(() => wx.stopPullDownRefresh())
+  },
+
   async loadPreferences() {
     this.setData({ loading: true, error: '' })
     try {
-      const form = await api.get('/reminders/preferences')
-      this.setData({ loading: false, form })
+      const [form, subscription] = await Promise.all([
+        api.get('/reminders/preferences'),
+        api.get('/reminders/status'),
+      ])
+      this.setData({
+        loading: false,
+        form,
+        subscription: { ...subscription, last_sent_label: sentAtLabel(subscription.last_sent_at) },
+      })
     } catch (error) {
       this.setData({ loading: false, error: error.message })
     }
@@ -43,6 +72,10 @@ Page({
     this.setData({ 'form.overdue_enabled': event.detail.value, saved: false })
   },
 
+  onAiEvaluationChange(event) {
+    this.setData({ 'form.ai_evaluation_enabled': event.detail.value, saved: false })
+  },
+
   changeLimit(event) {
     const delta = Number(event.currentTarget.dataset.delta)
     const dailyLimit = Math.max(1, Math.min(100, this.data.form.daily_limit + delta))
@@ -58,6 +91,7 @@ Page({
         preferred_time: this.data.form.preferred_time,
         daily_limit: this.data.form.daily_limit,
         overdue_enabled: this.data.form.overdue_enabled,
+        ai_evaluation_enabled: this.data.form.ai_evaluation_enabled,
         timezone: this.data.form.timezone,
       })
       this.setData({ saving: false, saved: true, form })
@@ -65,5 +99,47 @@ Page({
     } catch (error) {
       this.setData({ saving: false, error: error.message })
     }
+  },
+
+  requestSubscription() {
+    if (this.data.subscribing) return
+    const templateId = this.data.subscription.template_id
+    if (!templateId) {
+      this.setData({ error: '服务端尚未配置微信订阅消息模板 ID。' })
+      return
+    }
+    this.setData({ subscribing: true, error: '' })
+    // This call must remain directly inside the tap handler; WeChat requires a user gesture.
+    wx.requestSubscribeMessage({
+      tmplIds: [templateId],
+      success: async (result) => {
+        const decision = result[templateId]
+        if (!decision || decision === 'requestSubscribeMessage:ok') {
+          this.setData({ subscribing: false, error: '没有收到有效的授权结果，请重试。' })
+          return
+        }
+        try {
+          const subscription = await api.post('/reminders/subscription-grants', {
+            template_id: templateId,
+            result: decision,
+            idempotency_key: idempotencyKey('mini-subscribe'),
+          })
+          this.setData({
+            subscribing: false,
+            subscription: { ...subscription, last_sent_label: sentAtLabel(subscription.last_sent_at) },
+          })
+          if (decision === 'accept' || decision === 'acceptWithAudio') {
+            wx.showToast({ title: '已获得一次提醒授权', icon: 'success' })
+          } else {
+            this.setData({ error: decision === 'ban' ? '订阅消息已被关闭，请到小程序设置中开启。' : '这次没有授权提醒。' })
+          }
+        } catch (error) {
+          this.setData({ subscribing: false, error: error.message })
+        }
+      },
+      fail: (error) => {
+        this.setData({ subscribing: false, error: error.errMsg || '请求订阅授权失败' })
+      },
+    })
   },
 })

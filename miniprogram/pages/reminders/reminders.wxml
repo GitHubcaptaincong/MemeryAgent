@@ -26,7 +26,7 @@
       </picker>
       <view class="hairline"></view>
       <view class="setting-row {{!form.enabled ? 'setting-row--disabled' : ''}}">
-        <view class="setting-copy"><text>每日上限</text><text>避免一次出现太多任务</text></view>
+          <view class="setting-copy"><text>每日建议上限</text><text>只平衡展示负载，不改 FSRS 到期时间</text></view>
         <view class="stepper">
           <button disabled="{{!form.enabled || form.daily_limit <= 1}}" data-delta="-1" bindtap="changeLimit">−</button>
           <text>{{form.daily_limit}}</text>
@@ -35,8 +35,16 @@
       </view>
       <view class="hairline"></view>
       <view class="setting-row {{!form.enabled ? 'setting-row--disabled' : ''}}">
-        <view class="setting-copy"><text>包含逾期内容</text><text>优先补回已经错过的复习</text></view>
+        <view class="setting-copy"><text>提醒中包含逾期</text><text>关闭后逾期卡仍保留在“全部到期”中</text></view>
         <switch checked="{{form.overdue_enabled}}" disabled="{{!form.enabled}}" color="#34C759" bindchange="onOverdueChange" />
+      </view>
+    </view>
+
+    <text class="section-label">AI 辅助</text>
+    <view class="ios-card settings-group">
+      <view class="setting-row">
+        <view class="setting-copy"><text>回答后给出 AI 建议</text><text>分析缺失点并建议 1–4 级，你始终拥有最终决定权</text></view>
+        <switch checked="{{form.ai_evaluation_enabled}}" color="#34C759" bindchange="onAiEvaluationChange" />
       </view>
     </view>
 
@@ -50,22 +58,20 @@
 
     <button class="ios-button save-button" disabled="{{saving}}" bindtap="savePreferences">{{saving ? '正在保存…' : '保存设置'}}</button>
 
-    <text class="section-label">发送能力</text>
-    <view class="ios-card delivery-card">
-      <view class="delivery-row delivery-row--done">
-        <view class="delivery-icon">✓</view>
-        <view><text>到期队列与偏好</text><text>已实现，重新打开小程序即可看到到期内容。</text></view>
+    <text class="section-label">微信订阅提醒</text>
+    <view class="ios-card subscription-card">
+      <view class="subscription-heading">
+        <view class="delivery-icon {{subscription.delivery_enabled ? 'delivery-icon--ready' : ''}}">{{subscription.delivery_enabled ? '✓' : '!'}}</view>
+        <view><text>{{subscription.delivery_enabled ? '定时发送已就绪' : '发送服务尚未启用'}}</text><text>{{subscription.template_id ? '每次授权可发送一次到期提醒' : '请先在服务端配置订阅消息模板 ID'}}</text></view>
       </view>
-      <view class="hairline delivery-line"></view>
-      <view class="delivery-row">
-        <view class="delivery-icon">2</view>
-        <view><text>微信订阅消息</text><text>尚未接入。下一阶段需要消息模板、用户授权和定时发送任务。</text></view>
-      </view>
+      <view class="grant-count"><text>{{subscription.available_grants}}</text><view><text>可用提醒次数</text><text>微信一次性订阅授权会在发送成功后消耗</text></view></view>
+      <button class="ios-button subscribe-button" disabled="{{subscribing || !subscription.template_id}}" bindtap="requestSubscription">{{subscribing ? '正在请求授权…' : '授权一次复习提醒'}}</button>
+      <text wx:if="{{subscription.last_sent_label}}" class="last-delivery">上次发送：{{subscription.last_sent_label}} · {{subscription.last_delivery_status}}</text>
     </view>
 
     <view class="scope-card">
-      <text>当前边界</text>
-      <text>关闭小程序后暂时不会主动弹出提醒；该页面保存的是下一阶段接入订阅消息时需要的用户偏好。</text>
+      <text>提醒边界</text>
+      <text>授权必须由你主动点击；云函数按设置时间检查到期卡。发送结果不确定时不会盲目重发，避免重复提醒。</text>
     </view>
   </block>
 </view>

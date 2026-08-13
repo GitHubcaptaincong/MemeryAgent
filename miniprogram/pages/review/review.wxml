@@ -11,6 +11,24 @@
   <view wx:if="{{error}}" class="error-banner">{{error}}</view>
   <view wx:if="{{lastScheduleText}}" class="success-banner">✓ {{lastScheduleText}}</view>
 
+  <view wx:if="{{!loading}}" class="ios-card plan-card">
+    <view class="plan-card__top">
+      <view><text>TODAY</text><text>今日计划</text></view>
+      <text bindtap="goToInsights">学习统计 ›</text>
+    </view>
+    <view class="plan-card__numbers">
+      <text>{{dailyPlan.completed_today}}</text><text>/</text><text>{{dailyPlan.completed_today + dailyPlan.planned_count}}</text>
+      <text>建议上限 {{dailyPlan.daily_limit}}</text>
+    </view>
+    <view class="plan-progress"><view style="width: {{dailyPlan.progress_percent}}%;"></view></view>
+    <view class="plan-card__footer">
+      <text wx:if="{{dailyPlan.planned_count}}">还建议完成 {{dailyPlan.planned_count}} 题</text>
+      <text wx:else>今天的建议计划已完成</text>
+      <text wx:if="{{showAllDue}}" bindtap="showTodayPlan">返回今日计划 ›</text>
+      <text wx:elif="{{dailyPlan.overflow_count}}" bindtap="showAllDueCards">另有 {{dailyPlan.overflow_count}} 题到期 ›</text>
+    </view>
+  </view>
+
   <view wx:if="{{loading}}" class="ios-card loading-card">
     <view class="loading-dot"></view><text>正在同步复习队列</text>
   </view>
@@ -18,8 +36,9 @@
   <view wx:elif="{{!queue.length}}" class="ios-card empty-state">
     <view class="empty-state__icon">✓</view>
     <text class="empty-state__title">今天已经清空</text>
-    <text class="empty-state__copy">新确认的知识会自动出现在这里；完成自评后，系统会安排下次复习。</text>
+    <text class="empty-state__copy">{{dailyPlan.overflow_count ? '今日建议量已完成，其余到期内容仍可继续复习。' : '新确认的知识会自动出现在这里；完成自评后，系统会安排下次复习。'}}</text>
     <text wx:if="{{overview.next_due_at}}" class="empty-state__next">下一次复习：{{overview.next_due_label}}</text>
+    <button wx:if="{{dailyPlan.overflow_count}}" class="ios-button empty-action" bindtap="showAllDueCards">继续全部到期内容</button>
     <button class="ios-button ios-button--plain empty-action" bindtap="goToCapture">记录新内容</button>
   </view>
 
@@ -66,11 +85,34 @@
         <view wx:if="{{answerResult.evidence.length}}" class="evidence-card"><text>原文证据</text><text>“{{answerResult.evidence[0].quote}}”</text></view>
       </view>
 
+      <text class="section-label">AI 回答评估</text>
+      <view wx:if="{{answerResult.evaluation_status === 'pending'}}" class="ios-card evaluation-card evaluation-card--pending">
+        <view class="evaluation-status"><view class="evaluation-pulse"></view><view><text>正在检查要点覆盖</text><text>{{evaluationWaitingLong ? '模型仍在处理，你可以先完成自评，结果不会阻塞复习。' : 'AI 建议稍后自动出现；四个评分按钮现在就可以使用。'}}</text></view></view>
+      </view>
+      <view wx:elif="{{answerResult.evaluation_status === 'failed'}}" class="ios-card evaluation-card evaluation-card--failed">
+        <view class="evaluation-status"><view class="evaluation-fallback">!</view><view><text>AI 评估暂时不可用</text><text>这不会影响复习，请根据答案要点完成最终评分。</text></view></view>
+      </view>
+      <view wx:elif="{{answerResult.evaluation_status === 'disabled'}}" class="ios-card evaluation-card">
+        <view class="evaluation-status"><view class="evaluation-fallback">—</view><view><text>AI 评估已关闭</text><text>你可以在“提醒”页随时重新开启。</text></view></view>
+      </view>
+      <view wx:elif="{{answerResult.evaluation_status === 'completed'}}" class="ios-card evaluation-card evaluation-card--done">
+        <view class="evaluation-heading">
+          <view><text>AI 建议等级</text><text>{{answerResult.evaluation.suggested_rating}} / 4</text></view>
+          <text>仅供参考</text>
+        </view>
+        <text class="evaluation-summary">{{answerResult.evaluation.summary}}</text>
+        <view wx:if="{{answerResult.evaluation.missing_points.length}}" class="evaluation-points">
+          <text>建议补充</text>
+          <view wx:for="{{answerResult.evaluation.missing_points}}" wx:key="point_index"><text>{{index + 1}}</text><view><text>{{item.point}}</text><text>{{item.suggestion}}</text></view></view>
+        </view>
+        <view wx:else class="evaluation-complete">✓ 答案要点已全部覆盖</view>
+      </view>
+
       <text class="section-label">你的最终判断</text>
       <view class="rating-intro"><text>掌握得怎么样？</text><text>当前由你最终评分，AI 不会覆盖这个选择。</text></view>
       <view class="rating-grid">
-        <button wx:for="{{ratings}}" wx:key="value" class="rating-button rating-button--{{item.tone}}" disabled="{{busy}}" data-rating="{{item.value}}" bindtap="rateAnswer">
-          <text>{{item.value}}</text><text>{{item.label}}</text><text>{{item.hint}}</text>
+        <button wx:for="{{ratings}}" wx:key="value" class="rating-button rating-button--{{item.tone}} {{item.recommendedClass}}" disabled="{{busy}}" data-rating="{{item.value}}" bindtap="rateAnswer">
+          <view class="rating-button__top"><text>{{item.value}}</text><text wx:if="{{item.recommended}}">AI 建议</text></view><text>{{item.label}}</text><text>{{item.hint}}</text>
         </button>
       </view>
     </block>

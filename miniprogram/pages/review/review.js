@@ -20,7 +20,7 @@ function intervalLabel(intervalDays, dueAt) {
   return nextDueLabel(dueAt)
 }
 
-function ratingsFor(card) {
+function ratingsFor(card, suggestedRating) {
   const options = card && Array.isArray(card.rating_options) ? card.rating_options : []
   const labels = {
     1: ['忘记了', 'again'],
@@ -35,6 +35,8 @@ function ratingsFor(card) {
       label: labels[value][0],
       tone: labels[value][1],
       hint: option ? intervalLabel(option.interval_days, option.due_at) : '计算中',
+      recommended: Number(suggestedRating) === value,
+      recommendedClass: Number(suggestedRating) === value ? 'rating-button--recommended' : '',
     }
   })
 }
@@ -43,11 +45,36 @@ function historyFor(items) {
   return (items || []).map((item) => ({ ...item, next_due_label: nextDueLabel(item.next_due_at) }))
 }
 
+function decorateDailyPlan(plan) {
+  const value = plan || {}
+  const completed = Number(value.completed_today || 0)
+  const planned = Number(value.planned_count || 0)
+  const goal = completed + planned
+  return {
+    daily_limit: Number(value.daily_limit || 10),
+    completed_today: completed,
+    planned_count: planned,
+    due_now_count: Number(value.due_now_count || 0),
+    overflow_count: Number(value.overflow_count || 0),
+    must_do_count: Number(value.must_do_count || 0),
+    planned_cards: value.planned_cards || [],
+    progress_percent: goal > 0 ? Math.min(100, Math.round((completed / goal) * 100)) : 100,
+    balance_status: value.balance_status || 'balanced',
+  }
+}
+
+function plannedQueueFor(allQueue, dailyPlan) {
+  const byId = new Map((allQueue || []).map((card) => [card.id, card]))
+  return (dailyPlan.planned_cards || []).map((item) => byId.get(item.id)).filter(Boolean)
+}
+
 Page({
   data: {
     loading: true,
     busy: false,
     queue: [],
+    allQueue: [],
+    showAllDue: false,
     activeIndex: 0,
     activeCard: null,
     answer: '',
@@ -58,6 +85,8 @@ Page({
     error: '',
     overview: { due_count: 0, total_active: 0, next_due_at: null, next_due_label: '' },
     history: [],
+    dailyPlan: decorateDailyPlan(null),
+    evaluationWaitingLong: false,
     ratings: ratingsFor(null),
   },
 
@@ -71,19 +100,35 @@ Page({
     this.loadReviewData().finally(() => wx.stopPullDownRefresh())
   },
 
+  onHide() {
+    this.stopEvaluationPolling()
+  },
+
+  onUnload() {
+    this.stopEvaluationPolling()
+  },
+
   async loadReviewData() {
     this.setData({ loading: true, error: '' })
     try {
-      const [queue, overview, history] = await Promise.all([
-        api.get('/review/queue?limit=50'),
+      const [allQueue, overview, history, planPayload] = await Promise.all([
+        api.get('/review/queue?limit=100'),
         api.get('/review/overview'),
         api.get('/review/history?limit=10'),
+        api.get('/review/daily-plan'),
       ])
+      const dailyPlan = decorateDailyPlan(planPayload)
+      const queue = this.data.showAllDue ? allQueue : plannedQueueFor(allQueue, dailyPlan)
       const previousCardId = this.data.activeCard && this.data.activeCard.id
-      const activeIndex = Math.min(this.data.activeIndex, Math.max(0, queue.length - 1))
+      const previousIndex = queue.findIndex((card) => card.id === previousCardId)
+      const activeIndex = previousIndex >= 0
+        ? previousIndex
+        : Math.min(this.data.activeIndex, Math.max(0, queue.length - 1))
       const activeCard = queue[activeIndex] || null
+      this.stopEvaluationPolling()
       this.setData({
         queue,
+        allQueue,
         activeIndex,
         activeCard,
         answer: '',
@@ -93,10 +138,12 @@ Page({
         busy: false,
         overview: { ...overview, next_due_label: nextDueLabel(overview.next_due_at) },
         history: historyFor(history),
+        dailyPlan,
+        evaluationWaitingLong: false,
         ratings: ratingsFor(activeCard),
       })
       if (previousCardId !== (activeCard && activeCard.id)) this.resetAttemptKeys()
-      this.updateTabBadge(queue.length)
+      this.updateTabBadge(allQueue.length)
       wx.removeStorageSync('memoryAgentReviewQueueDirty')
     } catch (error) {
       this.setData({ loading: false, busy: false, error: error.message })
@@ -111,6 +158,7 @@ Page({
   selectCard(event) {
     const activeIndex = Number(event.currentTarget.dataset.index)
     const activeCard = this.data.queue[activeIndex]
+    this.stopEvaluationPolling()
     this.setData({
       activeIndex,
       activeCard,
@@ -118,6 +166,7 @@ Page({
       answerResult: null,
       hintsVisible: false,
       error: '',
+      evaluationWaitingLong: false,
       ratings: ratingsFor(activeCard),
     })
     this.resetAttemptKeys()
@@ -147,7 +196,11 @@ Page({
         answer,
         idempotency_key: this._answerIdempotencyKey,
       })
-      this.setData({ answerResult, busy: false })
+      this.setData({ answerResult, busy: false, evaluationWaitingLong: false })
+      if (answerResult.evaluation_status === 'pending') this.startEvaluationPolling(answerResult)
+      if (answerResult.evaluation_status === 'completed' && answerResult.evaluation) {
+        this.setData({ ratings: ratingsFor(card, answerResult.evaluation.suggested_rating) })
+      }
     } catch (error) {
       this.setData({ busy: false, error: error.message })
     }
@@ -173,6 +226,7 @@ Page({
         rating,
         idempotency_key: this._ratingIdempotencyKey,
       })
+      this.stopEvaluationPolling()
       const nextSessionCount = this._ratingAcknowledged
         ? this.data.sessionCount
         : this.data.sessionCount + 1
@@ -190,6 +244,92 @@ Page({
 
   goToCapture() {
     wx.switchTab({ url: '/pages/capture/capture' })
+  },
+
+  goToInsights() {
+    wx.navigateTo({ url: '/pages/insights/insights' })
+  },
+
+  showAllDueCards() {
+    if (this.data.showAllDue) return
+    const queue = this.data.allQueue
+    const activeCard = queue[0] || null
+    this.stopEvaluationPolling()
+    this.setData({
+      showAllDue: true,
+      queue,
+      activeIndex: 0,
+      activeCard,
+      answer: '',
+      answerResult: null,
+      hintsVisible: false,
+      ratings: ratingsFor(activeCard),
+    })
+    this.resetAttemptKeys()
+  },
+
+  showTodayPlan() {
+    if (!this.data.showAllDue) return
+    const queue = plannedQueueFor(this.data.allQueue, this.data.dailyPlan)
+    const activeCard = queue[0] || null
+    this.stopEvaluationPolling()
+    this.setData({
+      showAllDue: false,
+      queue,
+      activeIndex: 0,
+      activeCard,
+      answer: '',
+      answerResult: null,
+      hintsVisible: false,
+      ratings: ratingsFor(activeCard),
+    })
+    this.resetAttemptKeys()
+  },
+
+  startEvaluationPolling(answerResult) {
+    this.stopEvaluationPolling()
+    this._evaluationPollCount = 0
+    const poll = async () => {
+      if (!this.data.answerResult || this.data.answerResult.attempt_id !== answerResult.attempt_id) return
+      this._evaluationPollCount += 1
+      try {
+        const result = await api.get(`/review/cards/${answerResult.card_id}/attempts/${answerResult.attempt_id}/evaluation`)
+        if (!this.data.answerResult || this.data.answerResult.attempt_id !== answerResult.attempt_id) return
+        if (result.status === 'completed') {
+          const nextAnswerResult = {
+            ...this.data.answerResult,
+            evaluation_status: 'completed',
+            evaluation: result.evaluation,
+          }
+          this.setData({
+            answerResult: nextAnswerResult,
+            evaluationWaitingLong: false,
+            ratings: ratingsFor(this.data.activeCard, result.evaluation && result.evaluation.suggested_rating),
+          })
+          return
+        }
+        if (result.status === 'failed' || result.status === 'disabled') {
+          this.setData({
+            'answerResult.evaluation_status': result.status,
+            evaluationWaitingLong: false,
+          })
+          return
+        }
+      } catch (error) {
+        if (this._evaluationPollCount >= 3) this.setData({ evaluationWaitingLong: true })
+      }
+      if (this._evaluationPollCount >= 4) this.setData({ evaluationWaitingLong: true })
+      if (this._evaluationPollCount < 30) {
+        this._evaluationTimer = setTimeout(poll, 1200)
+      }
+    }
+    this._evaluationTimer = setTimeout(poll, 600)
+  },
+
+  stopEvaluationPolling() {
+    if (this._evaluationTimer) clearTimeout(this._evaluationTimer)
+    this._evaluationTimer = null
+    this._evaluationPollCount = 0
   },
 
   resetAttemptKeys() {

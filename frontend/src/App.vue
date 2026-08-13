@@ -38,17 +38,24 @@ const reviewSubmittedAnswer = ref('')
 const reviewRatingKey = ref(null)
 const reviewRatingValue = ref(null)
 const reviewRatingAcknowledged = ref(false)
+const reviewQueueMode = ref('today')
+const dailyPlan = ref(null)
+const insights = ref(null)
+const evaluationPollCount = ref(0)
 const reminder = ref({
   enabled: true,
   preferred_time: '20:00',
   daily_limit: 10,
   overdue_enabled: true,
+  ai_evaluation_enabled: true,
   timezone: 'Asia/Shanghai',
 })
+const subscriptionStatus = ref(null)
 const reminderBusy = ref(false)
 const reminderSaved = ref(false)
 let eventSource = null
 let clock = null
+let evaluationTimer = null
 
 const stateLabels = {
   queued: '排队中',
@@ -90,6 +97,17 @@ const signalAge = computed(() => {
   return Math.max(0, Math.floor((Date.now() - lastSignalAt.value) / 1000))
 })
 const dueCount = computed(() => reviewOverview.value.due_count ?? reviewQueue.value.length)
+const plannedCardIds = computed(() => new Set((dailyPlan.value?.planned_cards || []).map((card) => card.id)))
+const visibleReviewQueue = computed(() => {
+  if (reviewQueueMode.value === 'all' || !dailyPlan.value) return reviewQueue.value
+  return reviewQueue.value.filter((card) => plannedCardIds.value.has(card.id))
+})
+const todayCount = computed(() => dailyPlan.value?.planned_count ?? visibleReviewQueue.value.length)
+const answerEvaluation = computed(() => reviewAnswerResult.value?.evaluation || null)
+const evaluationStatus = computed(() => reviewAnswerResult.value?.evaluation_status || 'disabled')
+const masteryPercent = computed(() => Math.round((insights.value?.summary?.self_rated_mastery_rate || 0) * 100))
+const trendPoints = computed(() => (insights.value?.trend?.daily || []).slice(-7))
+const maxTrendValue = computed(() => Math.max(1, ...trendPoints.value.map((point) => point.completed_count || 0)))
 
 async function api(path, options = {}) {
   if (isPublicDemo) throw new Error(demoReadOnlyMessage)
@@ -319,7 +337,9 @@ async function showView(view) {
   activeView.value = view
   window.scrollTo({ top: 0, behavior: 'auto' })
   if (!isPublicDemo && view === 'review') await loadReviewData().catch((reason) => { reviewError.value = reason.message })
-  if (!isPublicDemo && view === 'reminders') await loadReminderSettings().catch((reason) => { error.value = reason.message })
+  if (!isPublicDemo && view === 'reminders') {
+    await Promise.all([loadReminderSettings(), loadSubscriptionStatus()]).catch((reason) => { error.value = reason.message })
+  }
 }
 
 async function loadReviewQueue() {
@@ -337,11 +357,23 @@ async function loadReviewHistory() {
   reviewHistory.value = await api('/api/v1/review/history?limit=10')
 }
 
+async function loadDailyPlan() {
+  dailyPlan.value = await api('/api/v1/review/daily-plan?include_overflow=true')
+}
+
+async function loadInsights() {
+  insights.value = await api('/api/v1/review/insights?trend_days=30&forecast_days=14&weak_limit=5')
+}
+
 async function loadReviewData() {
-  await Promise.all([loadReviewQueue(), loadReviewOverview(), loadReviewHistory()])
+  await Promise.all([loadReviewQueue(), loadReviewOverview(), loadReviewHistory(), loadDailyPlan(), loadInsights()])
+  if (!activeReviewCard.value || !visibleReviewQueue.value.some((item) => item.id === activeReviewCard.value.id)) {
+    selectReviewCard(visibleReviewQueue.value[0] || null)
+  }
 }
 
 function selectReviewCard(card) {
+  stopEvaluationPolling()
   activeReviewCard.value = card
   reviewAnswer.value = ''
   reviewAnswerResult.value = null
@@ -357,6 +389,8 @@ async function submitReviewAnswer() {
       answer: reviewAnswer.value.trim(),
       answer_key: activeReviewCard.value.answer_key,
       evidence: activeReviewCard.value.evidence,
+      evaluation_status: 'completed',
+      evaluation: publicDemo.answerEvaluation,
     }
     return
   }
@@ -375,10 +409,48 @@ async function submitReviewAnswer() {
         idempotency_key: reviewAnswerKey.value,
       }),
     })
+    if (reviewAnswerResult.value.evaluation_status === 'pending') startEvaluationPolling()
   } catch (reason) {
     reviewError.value = reason.message
   } finally {
     reviewBusy.value = false
+  }
+}
+
+function startEvaluationPolling() {
+  stopEvaluationPolling()
+  evaluationPollCount.value = 0
+  const poll = async () => {
+    if (!activeReviewCard.value || !reviewAnswerResult.value?.attempt_id) return
+    try {
+      const result = await api(`/api/v1/review/cards/${activeReviewCard.value.id}/attempts/${reviewAnswerResult.value.attempt_id}/evaluation`)
+      reviewAnswerResult.value = {
+        ...reviewAnswerResult.value,
+        evaluation_status: result.status,
+        evaluation: result.evaluation,
+      }
+      if (result.status !== 'pending') return
+    } catch (reason) {
+      if (evaluationPollCount.value >= 8) {
+        reviewAnswerResult.value = { ...reviewAnswerResult.value, evaluation_status: 'failed' }
+        return
+      }
+    }
+    evaluationPollCount.value += 1
+    if (evaluationPollCount.value < 10) evaluationTimer = window.setTimeout(poll, 1500)
+  }
+  evaluationTimer = window.setTimeout(poll, 800)
+}
+
+function stopEvaluationPolling() {
+  if (evaluationTimer) window.clearTimeout(evaluationTimer)
+  evaluationTimer = null
+}
+
+function switchReviewQueue(mode) {
+  reviewQueueMode.value = mode
+  if (!activeReviewCard.value || !visibleReviewQueue.value.some((item) => item.id === activeReviewCard.value.id)) {
+    selectReviewCard(visibleReviewQueue.value[0] || null)
   }
 }
 
@@ -396,9 +468,17 @@ async function rateReview(rating) {
       next_due_at: selectedOption?.due_at,
     }, ...reviewHistory.value].slice(0, 10)
     reviewQueue.value = reviewQueue.value.filter((item) => item.id !== reviewedCard.id)
+    if (dailyPlan.value) {
+      dailyPlan.value = {
+        ...dailyPlan.value,
+        completed_today: dailyPlan.value.completed_today + 1,
+        planned_count: Math.max(0, dailyPlan.value.planned_count - 1),
+        planned_cards: dailyPlan.value.planned_cards.filter((item) => item.id !== reviewedCard.id),
+      }
+    }
     reviewedThisSession.value += 1
     reviewOverview.value = { ...reviewOverview.value, due_count: reviewQueue.value.length, total_active: 2 }
-    selectReviewCard(reviewQueue.value[0] || null)
+    selectReviewCard(visibleReviewQueue.value[0] || null)
     return
   }
   if (reviewRatingKey.value && reviewRatingValue.value !== rating) {
@@ -440,6 +520,10 @@ function resetReviewAttempt() {
 
 async function loadReminderSettings() {
   reminder.value = await api('/api/v1/reminders/preferences')
+}
+
+async function loadSubscriptionStatus() {
+  subscriptionStatus.value = await api('/api/v1/reminders/status')
 }
 
 async function saveReminderSettings() {
@@ -534,12 +618,16 @@ function loadPublicDemo() {
   reviewQueue.value = [...publicDemo.reviewQueue]
   reviewOverview.value = { due_count: publicDemo.reviewQueue.length, total_active: publicDemo.reviewQueue.length, next_due_at: null }
   reviewHistory.value = [...publicDemo.reviewHistory]
-  selectReviewCard(reviewQueue.value[0])
+  dailyPlan.value = structuredClone(publicDemo.dailyPlan)
+  insights.value = structuredClone(publicDemo.insights)
+  subscriptionStatus.value = { ...publicDemo.subscriptionStatus }
+  selectReviewCard(visibleReviewQueue.value[0])
 }
 
 onBeforeUnmount(() => {
   closeStream()
   stopClock()
+  stopEvaluationPolling()
 })
 
 onMounted(() => {
@@ -565,7 +653,7 @@ onMounted(() => {
           <span>01</span><strong>整理</strong><small>材料转知识</small>
         </button>
         <button :class="{ active: activeView === 'review' }" @click="showView('review')">
-          <span>02</span><strong>复习</strong><small>提问与作答</small><b v-if="dueCount">{{ dueCount }}</b>
+          <span>02</span><strong>复习</strong><small>计划与统计</small><b v-if="dueCount">{{ dueCount }}</b>
         </button>
         <button :class="{ active: activeView === 'reminders' }" @click="showView('reminders')">
           <span>03</span><strong>提醒</strong><small>时间与数量</small>
@@ -682,14 +770,29 @@ onMounted(() => {
           </div>
           <div class="review-stats">
             <article><small>DUE NOW</small><strong>{{ dueCount }}</strong><span>当前待复习</span></article>
-            <article><small>THIS SESSION</small><strong>{{ reviewedThisSession }}</strong><span>本次已完成</span></article>
+            <article><small>TODAY PLAN</small><strong>{{ todayCount }}</strong><span>建议今日完成</span></article>
           </div>
         </header>
 
+        <section v-if="dailyPlan" class="daily-plan-card">
+          <div>
+            <small>DAILY LOAD</small>
+            <strong>今日已完成 {{ dailyPlan.completed_today }} / {{ dailyPlan.daily_limit }}</strong>
+            <p v-if="dailyPlan.overflow_count">还有 {{ dailyPlan.overflow_count }} 张超出今日软上限，可在“全部到期”中查看。</p>
+            <p v-else>当前负载在你设置的每日上限内。</p>
+          </div>
+          <span>{{ dailyPlan.balance_status === 'overloaded' ? '已平衡' : '负载合适' }}</span>
+        </section>
+
+        <div class="queue-mode" role="tablist" aria-label="复习队列范围">
+          <button :class="{ active: reviewQueueMode === 'today' }" @click="switchReviewQueue('today')">今日计划 <b>{{ todayCount }}</b></button>
+          <button :class="{ active: reviewQueueMode === 'all' }" @click="switchReviewQueue('all')">全部到期 <b>{{ dueCount }}</b></button>
+        </div>
+
         <div v-if="reviewError" class="error">{{ reviewError }}</div>
-        <div v-if="!reviewQueue.length" class="review-empty">
+        <div v-if="!visibleReviewQueue.length" class="review-empty">
           <span>ALL CLEAR</span>
-          <h2>今天到这里，队列已经清空。</h2>
+          <h2>{{ reviewQueueMode === 'today' ? '今日计划已完成。' : '全部到期队列已清空。' }}</h2>
           <p>确认新的知识草稿后，系统会立即生成首轮复习；完成自评后会按掌握程度安排下次时间。</p>
           <p v-if="reviewOverview.next_due_at" class="next-due">下一次复习：{{ formatNextDue(reviewOverview.next_due_at) }}</p>
           <button @click="showView('organize')">去整理新材料 <b>→</b></button>
@@ -699,7 +802,7 @@ onMounted(() => {
           <aside class="review-queue">
             <div class="queue-heading"><span>今日队列</span><b>{{ dueCount }}</b></div>
             <button
-              v-for="(card, index) in reviewQueue"
+              v-for="(card, index) in visibleReviewQueue"
               :key="card.id"
               :class="{ active: activeReviewCard?.id === card.id }"
               @click="selectReviewCard(card)"
@@ -733,6 +836,23 @@ onMounted(() => {
                 <div class="reference-answer"><small>ANSWER KEY</small><ul><li v-for="point in reviewAnswerResult.answer_key" :key="point">{{ point }}</li></ul></div>
                 <blockquote v-if="reviewAnswerResult.evidence?.[0]">“{{ reviewAnswerResult.evidence[0].quote }}”<cite>原文证据</cite></blockquote>
               </section>
+              <section v-if="evaluationStatus !== 'disabled'" class="ai-evaluation" :class="`is-${evaluationStatus}`">
+                <header>
+                  <div><small>AI ADVISORY</small><h3>AI 建议，不代替你评分</h3></div>
+                  <span v-if="evaluationStatus === 'completed'">建议 {{ answerEvaluation?.suggested_rating }} 级</span>
+                  <span v-else-if="evaluationStatus === 'pending'">后台评估中</span>
+                  <span v-else>本次未完成</span>
+                </header>
+                <div v-if="evaluationStatus === 'pending'" class="evaluation-pending"><i></i><p>回答已保存，你可以立即自评；AI 结果会自动刷新。</p></div>
+                <template v-else-if="evaluationStatus === 'completed' && answerEvaluation">
+                  <p class="evaluation-summary">{{ answerEvaluation.summary }}</p>
+                  <div class="evaluation-columns">
+                    <div><b>已覆盖</b><p v-for="item in answerEvaluation.covered_points" :key="`covered-${item.point_index}`">{{ item.point }}</p><small v-if="!answerEvaluation.covered_points?.length">暂无明确覆盖点</small></div>
+                    <div><b>建议补充</b><p v-for="item in answerEvaluation.missing_points" :key="`missing-${item.point_index}`">{{ item.suggestion }}</p><small v-if="!answerEvaluation.missing_points?.length">要点已基本覆盖</small></div>
+                  </div>
+                </template>
+                <p v-else class="evaluation-summary">评估失败不会阻塞复习，请仍根据对照结果自行评分。</p>
+              </section>
               <section class="self-rating">
                 <div><span>最后一步</span><h3>对照之后，你掌握得怎么样？</h3><p>当前 MVP 不让 AI 替你做最终判断；你的选择会直接决定下次复习时间。</p></div>
                 <div class="rating-grid">
@@ -744,6 +864,30 @@ onMounted(() => {
             </template>
           </article>
         </div>
+
+        <section v-if="insights" class="insights-section">
+          <div class="insights-heading"><div><small>LEARNING INSIGHTS</small><h2>复习趋势与薄弱知识</h2></div><span>自评掌握率 {{ masteryPercent }}%</span></div>
+          <div class="insight-grid">
+            <article class="trend-card">
+              <header><strong>近 7 天复习</strong><small>已完成 {{ insights.trend.summary.completed_count }} 次 · 连续 {{ insights.trend.summary.current_streak }} 天</small></header>
+              <div class="trend-bars">
+                <div v-for="point in trendPoints" :key="point.date"><i :style="{ height: `${Math.max(6, (point.completed_count / maxTrendValue) * 68)}px` }"></i><b>{{ point.completed_count }}</b><small>{{ point.date.slice(5) }}</small></div>
+              </div>
+              <p>统计来自你的最终自评，不将 AI 建议当作正确率。</p>
+            </article>
+            <article class="weak-card">
+              <header><strong>优先加强</strong><small>仅排名已有复习样本的知识</small></header>
+              <div v-for="card in insights.weak_cards.slice(0, 3)" :key="card.card_id">
+                <span>{{ Math.round(card.weakness_score) }}</span><p><b>{{ card.title }}</b><small>{{ card.source_title }} · {{ card.confidence === 'high' ? '高' : (card.confidence === 'medium' ? '中' : '低') }}置信度</small></p>
+              </div>
+              <p v-if="!insights.weak_cards.length" class="no-weakness">样本还不足，完成几次复习后再生成薄弱点。</p>
+            </article>
+          </div>
+          <article class="workload-card">
+            <div><strong>未来 7 天负载建议</strong><small>只调整展示计划，不改动 FSRS 到期时间</small></div>
+            <div class="workload-days"><span v-for="day in insights.workload.daily.slice(0, 7)" :key="day.date"><b>{{ day.recommended_count }}</b><small>{{ day.date.slice(5) }}</small></span></div>
+          </article>
+        </section>
 
         <section v-if="reviewHistory.length" class="review-history">
           <div class="history-heading"><div><span>RECENT REVIEWS</span><h2>最近复习</h2></div><small>保留最近 {{ reviewHistory.length }} 条</small></div>
@@ -759,7 +903,7 @@ onMounted(() => {
           <div>
             <p class="eyebrow">REVIEW RHYTHM</p>
             <h1>让复习出现得<em>刚刚好。</em></h1>
-            <p>先设置每日复习节奏。当前版本会保存偏好并生成到期队列，系统通知与跨端推送将在后续阶段接入。</p>
+            <p>设置每日复习节奏与 AI 建议。微信提醒需要你在小程序内主动授权，H5 只展示状态和能力边界。</p>
           </div>
         </header>
 
@@ -783,6 +927,11 @@ onMounted(() => {
               <span class="switch"></span>
               <span><strong>包含逾期内容</strong><small>优先补回已经错过的复习</small></span>
             </label>
+            <label class="setting-row switch-row">
+              <input v-model="reminder.ai_evaluation_enabled" type="checkbox" :disabled="isPublicDemo" />
+              <span class="switch"></span>
+              <span><strong>AI 回答建议</strong><small>后台评估缺失点与建议等级；你始终做最终评分</small></span>
+            </label>
             <div class="timezone-row"><span>时区</span><strong>{{ reminder.timezone }}</strong></div>
             <p v-if="error" class="error">{{ error }}</p>
             <p v-if="reminderSaved" class="saved-message">✓ 提醒偏好已保存</p>
@@ -791,12 +940,16 @@ onMounted(() => {
 
           <aside class="delivery-status">
             <p class="eyebrow">DELIVERY STATUS</p>
-            <h2>提醒分两层完成</h2>
+            <h2>微信一次性订阅</h2>
             <ol>
-              <li class="done"><span>01</span><div><strong>到期队列与偏好</strong><p>已实现。复习评分会计算下次到期时间，设置会持久化保存。</p></div></li>
-              <li><span>02</span><div><strong>浏览器 / 系统通知</strong><p>尚未接入。下一阶段可增加定时任务、通知权限和发送渠道。</p></div></li>
+              <li class="done"><span>01</span><div><strong>到期队列与定时调度</strong><p>服务端按偏好时间生成发送任务，不依赖 H5 持续打开。</p></div></li>
+              <li class="done"><span>02</span><div><strong>小程序内用户授权</strong><p>必须由用户点击触发；每次接受一次，对应一次可用发送机会。</p></div></li>
             </ol>
-            <div class="scope-note"><b>本阶段边界</b><p>关闭页面后不会主动弹出系统通知；重新打开应用时，可以在“复习”页看到已到期内容。</p></div>
+            <div class="subscription-card">
+              <span>可用授权次数</span><strong>{{ subscriptionStatus?.available_grants ?? 0 }}</strong>
+              <button disabled>请在微信小程序内授权</button>
+            </div>
+            <div class="scope-note"><b>H5 能力边界</b><p>H5 不调用 wx.requestSubscribeMessage，也不模拟授权结果。请在微信小程序的明确按钮点击中完成授权。</p></div>
           </aside>
         </div>
       </section>

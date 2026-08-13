@@ -1,0 +1,16 @@
+{
+  "timeout": 300,
+  "memorySize": 256,
+  "permissions": {
+    "openapi": [
+      "subscribeMessage.send"
+    ]
+  },
+  "triggers": [
+    {
+      "name": "reminder-dispatch-every-five-minutes",
+      "type": "timer",
+      "config": "0 */5 * * * * *"
+    }
+  ]
+}

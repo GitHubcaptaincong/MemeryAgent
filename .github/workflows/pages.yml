@@ -6,8 +6,6 @@ on:
     paths:
       - 'frontend/**'
       - '.github/workflows/pages.yml'
-      - 'project.config.json'
-      - 'project.private.config.json'
   workflow_dispatch:
 
 permissions:

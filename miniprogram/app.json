@@ -2,6 +2,7 @@
   "pages": [
     "pages/capture/capture",
     "pages/review/review",
+    "pages/insights/insights",
     "pages/reminders/reminders"
   ],
   "window": {

@@ -132,6 +132,11 @@
   color: #34c759;
 }
 
+.delivery-icon--ready {
+  background: #eaf8ee;
+  color: #34c759;
+}
+
 .delivery-row > view:last-child text {
   display: block;
 }
@@ -150,6 +155,74 @@
 
 .delivery-line {
   margin-left: 114rpx;
+}
+
+.subscription-card {
+  padding: 28rpx 30rpx;
+}
+
+.subscription-heading,
+.grant-count {
+  display: grid;
+  grid-template-columns: 64rpx 1fr;
+  gap: 20rpx;
+  align-items: center;
+}
+
+.subscription-heading > view:last-child text,
+.grant-count view text {
+  display: block;
+}
+
+.subscription-heading > view:last-child text:first-child {
+  font-size: 29rpx;
+  font-weight: 680;
+}
+
+.subscription-heading > view:last-child text:last-child {
+  margin-top: 7rpx;
+  color: #8e8e93;
+  font-size: 22rpx;
+  line-height: 1.45;
+}
+
+.grant-count {
+  grid-template-columns: 96rpx 1fr;
+  margin-top: 28rpx;
+  padding: 24rpx;
+  border-radius: 22rpx;
+  background: #f2f2f7;
+}
+
+.grant-count > text {
+  color: #007aff;
+  font-size: 50rpx;
+  font-weight: 760;
+  text-align: center;
+}
+
+.grant-count view text:first-child {
+  font-size: 25rpx;
+  font-weight: 650;
+}
+
+.grant-count view text:last-child {
+  margin-top: 5rpx;
+  color: #8e8e93;
+  font-size: 20rpx;
+  line-height: 1.45;
+}
+
+.subscribe-button {
+  margin-top: 24rpx;
+}
+
+.last-delivery {
+  display: block;
+  margin-top: 18rpx;
+  color: #8e8e93;
+  font-size: 21rpx;
+  text-align: center;
 }
 
 .scope-card {

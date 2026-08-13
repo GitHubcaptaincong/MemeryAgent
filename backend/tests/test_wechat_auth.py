@@ -75,6 +75,20 @@ def test_first_wechat_user_claims_legacy_data_and_users_are_isolated() -> None:
                 "total_active": 0,
                 "next_due_at": None,
             }
+            other_plan = client.get("/api/v1/review/daily-plan", headers=OTHER_HEADERS)
+            assert other_plan.status_code == 200
+            assert other_plan.json()["due_now_count"] == 0
+            other_insights = client.get(
+                "/api/v1/review/insights?trend_days=7&forecast_days=5",
+                headers=OTHER_HEADERS,
+            )
+            assert other_insights.status_code == 200
+            assert other_insights.json()["summary"]["active_card_count"] == 0
+            unknown_evaluation = client.get(
+                "/api/v1/review/cards/00000000-0000-0000-0000-000000000010/attempts/00000000-0000-0000-0000-000000000020/evaluation",
+                headers=OTHER_HEADERS,
+            )
+            assert unknown_evaluation.status_code == 404
 
             cross_user_run = client.post(
                 "/api/v1/runs",

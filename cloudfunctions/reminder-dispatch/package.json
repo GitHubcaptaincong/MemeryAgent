@@ -1,0 +1,13 @@
+{
+  "name": "memory-agent-reminder-dispatch",
+  "version": "1.0.0",
+  "private": true,
+  "description": "CloudBase timer bridge for WeChat Mini Program review reminders",
+  "main": "index.js",
+  "engines": {
+    "node": ">=16.13"
+  },
+  "dependencies": {
+    "wx-server-sdk": "^3.0.1"
+  }
+}

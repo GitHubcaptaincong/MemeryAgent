@@ -23,12 +23,15 @@
 - 回答与评分以不可变 `review_events` 保存，复习卡只作为当前调度投影。
 - 已接入官方 `py-fsrs 6.3.1`；使用 1/10 分钟学习步骤、10 分钟重学步骤、0.9 目标记忆率，并关闭随机抖动以支持确定性重放。
 - 评分前由服务端返回四档真实调度预览；评分后可查看最近复习、下一次到期和当前到期数量。
+- 可开关的异步 AI 回答评估：提交回答立即返回，后台给出已覆盖要点、缺失点和 1–4 级建议；用户评分始终是 FSRS 的唯一最终输入。
+- 学习统计：按不可变评分事件计算自评掌握趋势、可解释薄弱项与未来 14 天负载建议；每日上限只影响展示，不改 FSRS 到期时间。
 - 旧 MVP 卡片保留原到期时间，并在下一次评分时从不可变 `review_rated` 事件重放迁移到 FSRS；历史不完整时拒绝静默重置。
 - 提醒偏好持久化：启用状态、每日时间、数量上限、逾期策略和时区。
+- 微信一次性订阅授权、提醒额度、发送去重与结果回写；`cloudfunctions/reminder-dispatch` 每 5 分钟触发微信发送。
 - Vue 3 移动 H5：复用微信小程序的信息架构和 iOS 风格，用于 GitHub Pages 公开演示与浏览器调试。
 - 原生微信小程序客户端：快速记录、Agent 进度、复习作答与提醒设置。
 
-当前已支持通过 OpenAI-compatible Responses API 接入 CLIProxy，并保留 `FakeModelAdapter` 作为确定性回归基线。外部网页搜索、Embedding 生成、AI 语义判分、FSRS 个性化参数训练和浏览器/系统通知尚未接入。
+当前已支持通过 OpenAI-compatible Responses API 接入 CLIProxy，并保留 `FakeModelAdapter` 作为确定性回归基线。外部网页搜索、Embedding 生成、FSRS 个性化参数训练和非微信渠道的系统通知尚未接入。
 
 ## 一键启动（推荐）
 
@@ -115,9 +118,17 @@ APP_MODEL_PROVIDER=cli_proxy
 APP_MODEL_BASE_URL=https://<cloud-accessible-model-service>/v1
 APP_MODEL_API_KEY=<secret>
 APP_MODEL_NAME=gpt-5.4-mini
+APP_ANSWER_EVALUATION_TIMEOUT_SECONDS=15
+APP_ANSWER_EVALUATION_MAX_OUTPUT_TOKENS=1000
+APP_ANSWER_EVALUATION_REASONING_EFFORT=none
 APP_INLINE_WORKER=true
 APP_AUTO_CREATE_SCHEMA=false
 APP_SKILL_ROOT=/skills
+# 完成真实模板与云函数配置后再开启：
+APP_REMINDER_DELIVERY_ENABLED=true
+APP_REMINDER_DISPATCH_TOKEN=<long-random-shared-secret>
+APP_WECHAT_SUBSCRIBE_TEMPLATE_ID=<your-template-id>
+APP_WECHAT_SUBSCRIBE_PAGE=pages/review/review
 ```
 
 当前本机 CLIProxy 地址不能从 CloudBase 容器访问。云端必须使用公网或同 VPC 可访问的模型服务地址；只想先验证部署时，可以临时设置 `APP_MODEL_PROVIDER=fake`，但这不会调用真实模型。
@@ -125,6 +136,8 @@ APP_SKILL_ROOT=/skills
 根目录 Dockerfile 会在启动时执行 `alembic upgrade head`，因此目标 PostgreSQL 必须在容器启动前可连接。`frontend/` 和 `miniprogram/` 不需要由这个容器提供；小程序只调用云托管暴露的 FastAPI 地址。
 
 微信云托管模式下，后端读取 `wx.cloud.callContainer` 自动注入的 `X-WX-OPENID` 与 `X-WX-APPID`，映射为内部用户 UUID。已有单用户数据的首次认领和防误领步骤见 [微信 OpenID 用户隔离](./docs/wechat-user-isolation.md)。本地开发继续使用默认的 `APP_AUTH_MODE=local`。
+
+订阅消息必须由用户点击授权，并由外部定时云函数触发；完整模板、环境变量、部署与验收步骤见 [学习辅助模块部署](./docs/learning-assistance.md)。
 
 ## GitHub Pages 公开演示与 Neon
 
@@ -153,6 +166,7 @@ backend/src/memory_agent/   FastAPI、Agent Runtime、工具、记忆与任务�
 backend/migrations/         Alembic 数据库迁移
 frontend/src/               微信小程序风格的移动 H5 与公开演示
 miniprogram/                原生微信小程序客户端
+cloudfunctions/             微信订阅消息定时发送桥接
 project.config.json         微信开发者工具项目配置
 .agents/skills/             Agent 只读 Skills
 docs/                       阶段一技术设计
@@ -168,7 +182,7 @@ infra/postgres/             PostgreSQL 扩展初始化
 - 草稿确认不会自动授权写长期记忆；记忆候选必须再次批准。
 - Agent 运行时不能修改 Skills。
 - 用户自评是当前复习调度的最终输入；AI 只可在后续提供建议，不能静默覆盖用户选择。
-- 提醒页目前保存节奏偏好并展示到期队列，不代表关闭网页后会发送系统通知。
+- 微信提醒每次发送消耗一次用户授权；网络结果不确定时不盲目重发。真实发送只有在模板、字段映射、共享密钥和定时云函数全部配置后才生效。
 - 当前调度器是 `fsrs-6.3.1-v1`；调度配置单独版本化，后续升级必须通过历史事件重放，不能静默套用新参数。
 - 模型请求使用 `store=false`；Provider 回放项只存在于本次运行的工作内存，原始推理项不写入事件、Checkpoint 或长期记忆。
 - 自动恢复使用 `fresh_context_replay`：从已持久化的业务输入重新执行，保留事件、工具调用和 Token 预算，但不恢复模型隐式推理链。

@@ -83,6 +83,38 @@ def test_source_to_confirmed_draft_and_approved_memory() -> None:
         first_card = review_queue[0]
         assert first_card["scheduler_version"] == "fsrs-6.3.1-v1"
         assert [item["rating"] for item in first_card["rating_options"]] == [1, 2, 3, 4]
+        disabled_preference = client.put(
+            "/api/v1/reminders/preferences",
+            json={
+                "enabled": True,
+                "preferred_time": "20:00",
+                "daily_limit": 10,
+                "overdue_enabled": True,
+                "ai_evaluation_enabled": False,
+                "timezone": "Asia/Shanghai",
+            },
+        )
+        assert disabled_preference.status_code == 200
+        disabled_answer = client.post(
+            f"/api/v1/review/cards/{first_card['id']}/answers",
+            json={
+                "answer": "这次关闭 AI，只保留用户自评。",
+                "idempotency_key": "review-answer-disabled-0001",
+            },
+        ).json()
+        assert disabled_answer["evaluation_status"] == "disabled"
+        enabled_preference = client.put(
+            "/api/v1/reminders/preferences",
+            json={
+                "enabled": True,
+                "preferred_time": "20:00",
+                "daily_limit": 10,
+                "overdue_enabled": True,
+                "ai_evaluation_enabled": True,
+                "timezone": "Asia/Shanghai",
+            },
+        )
+        assert enabled_preference.status_code == 200
         answer_response = client.post(
             f"/api/v1/review/cards/{first_card['id']}/answers",
             json={
@@ -92,8 +124,17 @@ def test_source_to_confirmed_draft_and_approved_memory() -> None:
         )
         assert answer_response.status_code == 201, answer_response.text
         answer = answer_response.json()
-        assert answer["evaluation_status"] == "self_rating_required"
+        assert answer["evaluation_status"] == "pending"
         assert answer["answer_key"]
+        evaluation_response = client.get(
+            f"/api/v1/review/cards/{first_card['id']}/attempts/{answer['attempt_id']}/evaluation"
+        )
+        assert evaluation_response.status_code == 200
+        evaluation = evaluation_response.json()
+        assert evaluation["status"] == "completed"
+        assert evaluation["evaluation"]["suggested_rating"] in {1, 2, 3, 4}
+        assert evaluation["evaluation"]["covered_points"] is not None
+        assert evaluation["evaluation"]["missing_points"] is not None
         conflicting_answer = client.post(
             f"/api/v1/review/cards/{first_card['id']}/answers",
             json={
@@ -102,13 +143,7 @@ def test_source_to_confirmed_draft_and_approved_memory() -> None:
             },
         )
         assert conflicting_answer.status_code == 409
-        second_attempt = client.post(
-            f"/api/v1/review/cards/{first_card['id']}/answers",
-            json={
-                "answer": "这是同一轮中尚未评分的第二次尝试。",
-                "idempotency_key": "review-answer-flow-0002",
-            },
-        ).json()
+        second_attempt = disabled_answer
         rating_payload = {
             "attempt_id": answer["attempt_id"],
             "rating": 3,
@@ -120,6 +155,10 @@ def test_source_to_confirmed_draft_and_approved_memory() -> None:
         )
         assert rating_response.status_code == 200, rating_response.text
         assert rating_response.json()["user_rating_is_final"] is True
+        assert rating_response.json()["ai_suggested_rating"] == evaluation["evaluation"]["suggested_rating"]
+        assert rating_response.json()["user_overrode_ai"] is (
+            evaluation["evaluation"]["suggested_rating"] != 3
+        )
         assert rating_response.json()["interval_days"] > 0
         assert rating_response.json()["scheduler_version"] == "fsrs-6.3.1-v1"
         assert rating_response.json()["scheduler_state"]["algorithm"] == "fsrs-6"
@@ -153,6 +192,16 @@ def test_source_to_confirmed_draft_and_approved_memory() -> None:
         assert history.status_code == 200
         assert history.json()[0]["card_id"] == first_card["id"]
         assert history.json()[0]["rating"] == 3
+        daily_plan = client.get("/api/v1/review/daily-plan")
+        assert daily_plan.status_code == 200
+        assert daily_plan.json()["fsrs_schedule_changed"] is False
+        assert daily_plan.json()["completed_today"] >= 1
+        insights = client.get(
+            "/api/v1/review/insights?trend_days=7&forecast_days=5&weak_limit=5"
+        )
+        assert insights.status_code == 200
+        assert insights.json()["trend"]["days"] == 7
+        assert insights.json()["workload"]["fsrs_schedule_changed"] is False
 
         reminder = client.get("/api/v1/reminders/preferences")
         assert reminder.status_code == 200
@@ -163,6 +212,7 @@ def test_source_to_confirmed_draft_and_approved_memory() -> None:
                 "preferred_time": "19:30",
                 "daily_limit": 8,
                 "overdue_enabled": True,
+                "ai_evaluation_enabled": True,
                 "timezone": "Asia/Shanghai",
             },
         )
@@ -185,7 +235,10 @@ def test_source_to_confirmed_draft_and_approved_memory() -> None:
             assert session.scalar(select(func.count(MemoryItem.id))) == 1
             assert session.scalar(select(func.count(RetrievalDocument.id))) == 1
             assert session.scalar(select(func.count(ReviewCard.id))) == len(draft["units"])
-            assert session.scalar(select(func.count(ReviewEvent.id))) == 3
+            event_types = session.scalars(select(ReviewEvent.event_type)).all()
+            assert event_types.count("answer_submitted") == 2
+            assert event_types.count("answer_evaluation_completed") == 1
+            assert event_types.count("review_rated") == 1
             assert session.scalar(select(func.count(ReminderPreference.id))) == 1
         finally:
             session.close()

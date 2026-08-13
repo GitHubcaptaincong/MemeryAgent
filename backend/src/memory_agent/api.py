@@ -6,12 +6,13 @@ from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from memory_agent.auth import IdentityContext, get_current_identity
+from memory_agent.analytics import get_daily_plan, get_review_insights
 from memory_agent.config import Settings, get_settings
 from memory_agent.database import SessionLocal, get_session
 from memory_agent.models import (
@@ -25,6 +26,8 @@ from memory_agent.models import (
 from memory_agent.runtime import get_job_runner
 from memory_agent.review import (
     get_reminder_preference,
+    get_answer_evaluation,
+    get_answer_evaluation_job,
     get_review_overview,
     list_due_review_cards,
     list_review_history,
@@ -40,8 +43,13 @@ from memory_agent.schemas import (
     MemoryDecision,
     ReminderPreferenceRead,
     ReminderPreferenceUpdate,
+    ReminderSubscriptionGrantCreate,
+    ReminderSubscriptionStatusRead,
+    ReminderDispatchClaim,
+    ReminderDispatchResult,
     ReviewAnswerCreate,
     ReviewAnswerRead,
+    ReviewEvaluationRead,
     ReviewCardRead,
     ReviewHistoryRead,
     ReviewOverviewRead,
@@ -58,6 +66,13 @@ from memory_agent.services import (
     create_source,
     decide_memory_candidate,
     get_draft_for_user,
+)
+from memory_agent.reminders import (
+    claim_due_reminders,
+    record_delivery_result,
+    record_subscription_result,
+    reminder_status,
+    verify_dispatch_token,
 )
 
 
@@ -130,6 +145,43 @@ def get_review_history(
     ]
 
 
+@router.get("/review/insights")
+def get_review_insights_route(
+    trend_days: int = Query(default=30, ge=1, le=365),
+    forecast_days: int = Query(default=14, ge=1, le=90),
+    weak_limit: int = Query(default=10, ge=0, le=100),
+    session: Session = Depends(get_session),
+    identity: IdentityContext = Depends(get_current_identity),
+) -> dict[str, object]:
+    preference = get_reminder_preference(session, user_id=identity.user.id)
+    return get_review_insights(
+        session,
+        user_id=identity.user.id,
+        trend_days=trend_days,
+        forecast_days=forecast_days,
+        weak_limit=weak_limit,
+        timezone=preference.timezone,
+        daily_limit=preference.daily_limit,
+    )
+
+
+@router.get("/review/daily-plan")
+def get_review_daily_plan(
+    include_overflow: bool = Query(default=False),
+    session: Session = Depends(get_session),
+    identity: IdentityContext = Depends(get_current_identity),
+) -> dict[str, object]:
+    preference = get_reminder_preference(session, user_id=identity.user.id)
+    return get_daily_plan(
+        session,
+        user_id=identity.user.id,
+        daily_limit=preference.daily_limit,
+        timezone=preference.timezone,
+        overdue_enabled=preference.overdue_enabled,
+        include_overflow=include_overflow,
+    )
+
+
 @router.post(
     "/review/cards/{card_id}/answers",
     response_model=ReviewAnswerRead,
@@ -138,12 +190,13 @@ def get_review_history(
 def post_review_answer(
     card_id: UUID,
     data: ReviewAnswerCreate,
+    background_tasks: BackgroundTasks,
     session: Session = Depends(get_session),
     identity: IdentityContext = Depends(get_current_identity),
 ) -> ReviewAnswerRead:
     user, _ = _identity(identity)
     try:
-        result = submit_review_answer(
+        result, job = submit_review_answer(
             session,
             user_id=user.id,
             card_id=card_id,
@@ -154,7 +207,41 @@ def post_review_answer(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if job is not None and identity.settings.inline_worker:
+        # The durable job remains recoverable even if this request is interrupted.
+        background_tasks.add_task(get_job_runner().run_job, job.id)
     return ReviewAnswerRead.model_validate(result)
+
+
+@router.get(
+    "/review/cards/{card_id}/attempts/{attempt_id}/evaluation",
+    response_model=ReviewEvaluationRead,
+)
+def get_review_evaluation(
+    card_id: UUID,
+    attempt_id: UUID,
+    background_tasks: BackgroundTasks,
+    session: Session = Depends(get_session),
+    identity: IdentityContext = Depends(get_current_identity),
+) -> ReviewEvaluationRead:
+    try:
+        result = get_answer_evaluation(
+            session,
+            user_id=identity.user.id,
+            card_id=card_id,
+            attempt_id=attempt_id,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if result["status"] == "pending" and identity.settings.inline_worker:
+        job = get_answer_evaluation_job(
+            session,
+            user_id=identity.user.id,
+            attempt_id=attempt_id,
+        )
+        if job is not None:
+            background_tasks.add_task(get_job_runner().run_job, job.id)
+    return ReviewEvaluationRead.model_validate(result)
 
 
 @router.post("/review/cards/{card_id}/ratings", response_model=ReviewResultRead)
@@ -207,9 +294,84 @@ def put_reminder_settings(
             preferred_time=data.preferred_time,
             daily_limit=data.daily_limit,
             overdue_enabled=data.overdue_enabled,
+            ai_evaluation_enabled=data.ai_evaluation_enabled,
             timezone=data.timezone,
         )
     )
+
+
+@router.post("/reminders/subscription-grants", response_model=ReminderSubscriptionStatusRead)
+def post_reminder_subscription_grant(
+    data: ReminderSubscriptionGrantCreate,
+    session: Session = Depends(get_session),
+    identity: IdentityContext = Depends(get_current_identity),
+) -> ReminderSubscriptionStatusRead:
+    expected_template = identity.settings.wechat_subscribe_template_id
+    if not expected_template or data.template_id != expected_template:
+        raise HTTPException(status_code=409, detail="subscription template is not configured")
+    try:
+        record_subscription_result(
+            session,
+            user_id=identity.user.id,
+            template_id=data.template_id,
+            result=data.result,
+            idempotency_key=data.idempotency_key,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return ReminderSubscriptionStatusRead.model_validate(
+        reminder_status(session, user_id=identity.user.id, settings=identity.settings)
+    )
+
+
+@router.get("/reminders/status", response_model=ReminderSubscriptionStatusRead)
+def get_reminder_subscription_status(
+    session: Session = Depends(get_session),
+    identity: IdentityContext = Depends(get_current_identity),
+) -> ReminderSubscriptionStatusRead:
+    return ReminderSubscriptionStatusRead.model_validate(
+        reminder_status(session, user_id=identity.user.id, settings=identity.settings)
+    )
+
+
+@router.post("/internal/reminders/dispatch/claim")
+def post_reminder_dispatch_claim(
+    data: ReminderDispatchClaim,
+    x_reminder_dispatch_token: str | None = Header(default=None),
+    session: Session = Depends(get_session),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, list[dict[str, object]]]:
+    verify_dispatch_token(x_reminder_dispatch_token, settings)
+    return {
+        "jobs": claim_due_reminders(
+            session,
+            settings=settings,
+            batch_size=min(data.batch_size, settings.reminder_batch_size),
+            lease_seconds=min(data.lease_seconds, settings.reminder_lease_seconds),
+        )
+    }
+
+
+@router.post("/internal/reminders/dispatch/{delivery_id}/result")
+def post_reminder_dispatch_result(
+    delivery_id: UUID,
+    data: ReminderDispatchResult,
+    x_reminder_dispatch_token: str | None = Header(default=None),
+    session: Session = Depends(get_session),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, str]:
+    verify_dispatch_token(x_reminder_dispatch_token, settings)
+    try:
+        delivery = record_delivery_result(
+            session,
+            delivery_id=delivery_id,
+            result_status=data.status,
+            wechat_errcode=data.wechat_errcode,
+            wechat_errmsg=data.wechat_errmsg,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"id": str(delivery.id), "status": delivery.status}
 
 
 @router.post("/sources", response_model=SourceRead, status_code=status.HTTP_201_CREATED)

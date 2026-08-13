@@ -1,0 +1,65 @@
+<view class="page-shell insights-page">
+  <view class="large-title">
+    <text class="large-title__eyebrow">LEARNING INSIGHTS</text>
+    <text class="large-title__heading">看见学习节奏。</text>
+    <text class="large-title__copy">薄弱项来自你的最终评分；负载建议只调整展示，不会改动 FSRS 到期时间。</text>
+  </view>
+
+  <view wx:if="{{error}}" class="error-banner">{{error}}</view>
+  <view wx:if="{{loading}}" class="ios-card insights-loading">正在计算学习统计…</view>
+
+  <block wx:elif="{{insights}}">
+    <view class="summary-grid">
+      <view class="ios-card summary-card"><text>{{insights.summary.completed_in_period}}</text><text>{{trendDays}} 天复习</text></view>
+      <view class="ios-card summary-card"><text>{{insights.mastery_percent}}%</text><text>自评掌握率</text></view>
+      <view class="ios-card summary-card"><text>{{insights.summary.due_count}}</text><text>当前到期</text></view>
+    </view>
+
+    <view class="section-heading">
+      <view><text>REVIEW TREND</text><text>复习趋势</text></view>
+      <view class="range-switch"><text class="{{range7Class}}" data-days="7" bindtap="changeTrendDays">7 天</text><text class="{{range30Class}}" data-days="30" bindtap="changeTrendDays">30 天</text></view>
+    </view>
+    <view class="ios-card chart-card">
+      <scroll-view class="chart-scroll" scroll-x="{{true}}" show-scrollbar="{{false}}">
+        <view class="trend-chart">
+          <view wx:for="{{insights.trend.daily}}" wx:key="date" class="trend-column">
+            <text>{{item.completed_count || ''}}</text>
+            <view style="height: {{item.bar_height}}rpx;" class="trend-bar {{item.bar_class}}"></view>
+            <text>{{item.date_label}}</text>
+          </view>
+        </view>
+      </scroll-view>
+      <view class="trend-summary"><text>连续 {{insights.trend.summary.current_streak}} 天</text><text>{{insights.trend.summary.active_days}} 个活跃日 · {{insights.trend.summary.struggle_count}} 次困难自评</text></view>
+    </view>
+
+    <view class="section-heading"><view><text>WEAK KNOWLEDGE</text><text>薄弱知识</text></view><text>0–100，越高越需关注</text></view>
+    <view wx:if="{{insights.weak_cards.length}}" class="ios-card weakness-card">
+      <view wx:for="{{insights.weak_cards}}" wx:key="card_id" class="weakness-item">
+        <view class="weakness-score"><text>{{item.weakness_score}}</text><text>{{item.confidence_label}}</text></view>
+        <view class="weakness-copy"><text>{{item.title}}</text><text>{{item.source_title}} · 复习 {{item.reviewed_count}} 次</text><text wx:for="{{item.top_reasons}}" wx:key="*this">• {{item}}</text></view>
+      </view>
+    </view>
+    <view wx:else class="ios-card empty-insight">完成几次复习后，这里会出现可解释的薄弱项。</view>
+
+    <view wx:if="{{insights.weak_tags.length}}" class="tag-strip">
+      <view wx:for="{{insights.weak_tags}}" wx:key="tag"><text>{{item.tag}}</text><text>{{item.weakness_score}}</text></view>
+    </view>
+
+    <view class="section-heading"><view><text>WORKLOAD</text><text>未来 14 天负载</text></view><text>建议上限 {{insights.workload.daily_limit}}</text></view>
+    <view class="ios-card chart-card workload-card">
+      <scroll-view class="chart-scroll" scroll-x="{{true}}" show-scrollbar="{{false}}">
+        <view class="workload-chart">
+          <view wx:for="{{insights.workload.daily}}" wx:key="date" class="workload-column">
+            <view class="workload-bars">
+              <view class="workload-bar workload-bar--due" style="height: {{item.canonical_height}}rpx;"></view>
+              <view class="workload-bar workload-bar--plan" style="height: {{item.recommended_height}}rpx;"></view>
+            </view>
+            <text>{{item.date_label}}</text>
+          </view>
+        </view>
+      </scroll-view>
+      <view class="chart-legend"><view><view class="legend-dot legend-dot--due"></view><text>FSRS 到期</text></view><view><view class="legend-dot legend-dot--plan"></view><text>负载建议</text></view></view>
+      <text wx:if="{{insights.workload.carry_over_count}}" class="workload-note">预测窗口后仍有 {{insights.workload.carry_over_count}} 张卡需要承接；到期时间本身未被修改。</text>
+    </view>
+  </block>
+</view>

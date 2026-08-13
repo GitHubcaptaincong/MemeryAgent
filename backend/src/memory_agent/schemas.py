@@ -165,8 +165,16 @@ class ReviewAnswerRead(ApiModel):
     answer: str
     answer_key: list[str]
     evidence: list[EvidenceRead]
-    evaluation_status: Literal["self_rating_required"]
+    evaluation_status: Literal["disabled", "pending", "completed", "failed"]
+    evaluation: dict[str, Any] | None = None
     submitted_at: datetime
+
+
+class ReviewEvaluationRead(ApiModel):
+    attempt_id: UUID
+    card_id: UUID
+    status: Literal["disabled", "pending", "completed", "failed"]
+    evaluation: dict[str, Any] | None = None
 
 
 class ReviewRatingCreate(ApiModel):
@@ -188,6 +196,8 @@ class ReviewResultRead(ApiModel):
     scheduler_state: dict[str, Any]
     schedule_before: dict[str, Any]
     user_rating_is_final: bool
+    ai_suggested_rating: Literal[1, 2, 3, 4] | None = None
+    user_overrode_ai: bool | None = None
 
 
 class ReviewOverviewRead(ApiModel):
@@ -215,6 +225,7 @@ class ReminderPreferenceUpdate(ApiModel):
     preferred_time: str = Field(default="20:00", pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")
     daily_limit: int = Field(default=10, ge=1, le=100)
     overdue_enabled: bool = True
+    ai_evaluation_enabled: bool = True
     timezone: str = Field(default="Asia/Shanghai", min_length=1, max_length=64)
 
 
@@ -223,3 +234,29 @@ class ReminderPreferenceRead(ReminderPreferenceUpdate):
     user_id: UUID
     created_at: datetime
     updated_at: datetime
+
+
+class ReminderSubscriptionGrantCreate(ApiModel):
+    template_id: str = Field(min_length=1, max_length=128)
+    result: Literal["accept", "acceptWithAudio", "reject", "ban", "filter"]
+    idempotency_key: str = Field(min_length=8, max_length=128)
+
+
+class ReminderSubscriptionStatusRead(ApiModel):
+    template_id: str | None
+    delivery_enabled: bool
+    available_grants: int
+    last_delivery_status: str | None
+    last_sent_at: datetime | None
+
+
+class ReminderDispatchClaim(ApiModel):
+    batch_size: int = Field(default=50, ge=1, le=200)
+    lease_seconds: int = Field(default=120, ge=30, le=600)
+
+
+class ReminderDispatchResult(ApiModel):
+    status: Literal["sent", "failed", "uncertain"]
+    wechat_errcode: int | None = None
+    wechat_errmsg: str | None = Field(default=None, max_length=500)
+    response: dict[str, Any] | None = None

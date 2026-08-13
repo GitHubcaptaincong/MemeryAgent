@@ -423,6 +423,7 @@ class ReviewEvent(Base):
         ),
         Index("ix_review_events_card_created", "card_id", "created_at"),
         Index("ix_review_events_correlation", "correlation_id", "event_type"),
+        Index("ix_review_events_user_type_created", "user_id", "event_type", "created_at"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -455,7 +456,69 @@ class ReminderPreference(Base):
     preferred_time: Mapped[str] = mapped_column(String(5), default="20:00", nullable=False)
     daily_limit: Mapped[int] = mapped_column(Integer, default=10, nullable=False)
     overdue_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    ai_evaluation_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     timezone: Mapped[str] = mapped_column(String(64), default="Asia/Shanghai", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now
+    )
+
+
+class ReminderSubscriptionGrant(Base):
+    __tablename__ = "reminder_subscription_grants"
+    __table_args__ = (
+        UniqueConstraint("user_id", "idempotency_key", name="uq_reminder_grant_user_key"),
+        Index(
+            "ix_reminder_grants_user_template_status",
+            "user_id",
+            "template_id",
+            "status",
+            "created_at",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    template_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class ReminderDelivery(Base):
+    __tablename__ = "reminder_deliveries"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "template_id",
+            "local_date",
+            name="uq_reminder_delivery_user_template_date",
+        ),
+        Index("ix_reminder_deliveries_status_scheduled", "status", "scheduled_for"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    grant_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("reminder_subscription_grants.id", ondelete="SET NULL"),
+    )
+    template_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    local_date: Mapped[str] = mapped_column(String(10), nullable=False)
+    scheduled_for: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    due_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), default="sending", nullable=False)
+    attempt_count: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    response_code: Mapped[int | None] = mapped_column(Integer)
+    error_code: Mapped[str | None] = mapped_column(String(100))
+    last_attempt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, onupdate=utc_now

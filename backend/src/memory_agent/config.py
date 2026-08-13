@@ -40,6 +40,9 @@ class Settings(BaseSettings):
     model_quick_reasoning_effort: Literal["none", "low", "medium"] = "none"
     model_quick_max_output_tokens: int = Field(default=2_500, ge=1_000, le=20_000)
     model_verify_ssl: bool = True
+    answer_evaluation_timeout_seconds: float = Field(default=15, ge=3, le=60)
+    answer_evaluation_max_output_tokens: int = Field(default=1_000, ge=300, le=4_000)
+    answer_evaluation_reasoning_effort: Literal["none", "low", "medium"] = "none"
     web_access_default: bool = False
     agent_max_tool_calls: int = Field(default=12, ge=1, le=100)
     agent_max_web_searches: int = Field(default=2, ge=0, le=20)
@@ -48,6 +51,12 @@ class Settings(BaseSettings):
     auto_create_schema: bool = False
     inline_worker: bool = True
     worker_poll_seconds: float = Field(default=1.0, ge=0.1, le=60)
+    reminder_delivery_enabled: bool = False
+    reminder_dispatch_token: SecretStr | None = None
+    wechat_subscribe_template_id: str | None = None
+    wechat_subscribe_page: str = "pages/review/review"
+    reminder_batch_size: int = Field(default=50, ge=1, le=200)
+    reminder_lease_seconds: int = Field(default=120, ge=30, le=600)
     skill_root: Path = WORKSPACE_ROOT / ".agents" / "skills"
 
     @field_validator("database_url", mode="before")
@@ -116,6 +125,13 @@ class Settings(BaseSettings):
             else None
         )
 
+    @property
+    def reminder_dispatch_token_value(self) -> str | None:
+        return (
+            self.reminder_dispatch_token.get_secret_value()
+            if self.reminder_dispatch_token
+            else None
+        )
 
 @lru_cache
 def get_settings() -> Settings:
