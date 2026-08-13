@@ -5,6 +5,8 @@ from uuid import UUID
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
+from memory_agent import auth as auth_module
+from memory_agent.auth import resolve_identity
 from memory_agent.config import Settings, get_settings
 from memory_agent.database import SessionLocal
 from memory_agent.main import app
@@ -108,3 +110,39 @@ def test_first_wechat_user_claims_legacy_data_and_users_are_isolated() -> None:
         assert other_identity.user_id != owner_identity.user_id
         assert source is not None
         assert source.user_id == owner_identity.user_id
+
+
+def test_duplicate_identity_race_reuses_the_winning_mapping(monkeypatch) -> None:
+    race_app_id = "wxrace1234567890"
+    race_headers = {
+        "x-wx-appid": race_app_id,
+        "x-wx-openid": "race_openid_123456",
+    }
+    settings = Settings(
+        auth_mode="wechat",
+        wechat_app_id=race_app_id,
+        wechat_claim_local_user=False,
+        model_provider="fake",
+    )
+
+    with SessionLocal() as session:
+        winner = resolve_identity(session, settings, race_headers)
+        winner_user_id = winner.user.id
+
+    original_lookup = auth_module._identity_for_openid
+    lookup_count = 0
+
+    def stale_then_current_lookup(session, *, app_id, openid):
+        nonlocal lookup_count
+        lookup_count += 1
+        if lookup_count == 1:
+            return None
+        return original_lookup(session, app_id=app_id, openid=openid)
+
+    monkeypatch.setattr(auth_module, "_identity_for_openid", stale_then_current_lookup)
+
+    with SessionLocal() as session:
+        recovered = resolve_identity(session, settings, race_headers)
+
+    assert recovered.user.id == winner_user_id
+    assert lookup_count == 2

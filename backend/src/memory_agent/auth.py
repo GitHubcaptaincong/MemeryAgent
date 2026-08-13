@@ -109,40 +109,44 @@ def resolve_identity(
         session.commit()
         return IdentityContext(user=user, profile=profile, settings=settings)
 
-    if _should_claim_local_user(session, settings=settings, openid=openid):
-        user = session.scalar(
-            select(User)
-            .where(User.id == settings.local_user_id)
-            .with_for_update()
-        )
-        if user is None:
-            user, _profile = ensure_local_identity(session, settings)
-        bound_identity = session.scalar(
-            select(WechatIdentity).where(WechatIdentity.user_id == settings.local_user_id)
-        )
-        if bound_identity is not None:
-            if settings.wechat_legacy_owner_openid_value is not None:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail="legacy user has already been claimed",
-                )
-            user = _new_wechat_user(session)
-    else:
-        user = _new_wechat_user(session)
-
-    identity = WechatIdentity(
-        user_id=user.id,
-        app_id=app_id,
-        openid=openid,
-        unionid=unionid,
-        last_seen_at=utc_now(),
-    )
-    session.add(identity)
-    profile = ensure_default_profile(session, user)
     try:
+        if _should_claim_local_user(session, settings=settings, openid=openid):
+            user = session.scalar(
+                select(User)
+                .where(User.id == settings.local_user_id)
+                .with_for_update()
+            )
+            if user is None:
+                user, _profile = ensure_local_identity(session, settings)
+            bound_identity = session.scalar(
+                select(WechatIdentity).where(WechatIdentity.user_id == settings.local_user_id)
+            )
+            if bound_identity is not None:
+                if settings.wechat_legacy_owner_openid_value is not None:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail="legacy user has already been claimed",
+                    )
+                user = _new_wechat_user(session)
+        else:
+            user = _new_wechat_user(session)
+
+        identity = WechatIdentity(
+            user_id=user.id,
+            app_id=app_id,
+            openid=openid,
+            unionid=unionid,
+            last_seen_at=utc_now(),
+        )
+        session.add(identity)
+        # The profile lookup may autoflush the pending identity. Keep the
+        # complete create path inside the race handler, not only commit().
+        profile = ensure_default_profile(session, user)
         session.commit()
     except IntegrityError:
         session.rollback()
+        # Parallel page requests can both observe a missing mapping. The
+        # unique constraint elects one winner; losers reuse that committed row.
         identity = _identity_for_openid(session, app_id=app_id, openid=openid)
         if identity is None:
             raise
