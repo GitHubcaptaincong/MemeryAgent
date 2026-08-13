@@ -60,6 +60,11 @@
 
     <text class="section-label">微信订阅提醒</text>
     <view class="ios-card subscription-card">
+      <view wx:if="{{!subscriptionStatusAvailable}}" class="subscription-heading">
+        <view class="delivery-icon">!</view>
+        <view><text>订阅状态暂不可用</text><text>云端服务正在更新，提醒偏好仍可正常保存；部署新版后会自动恢复。</text></view>
+      </view>
+      <block wx:else>
       <view class="subscription-heading">
         <view class="delivery-icon {{subscription.delivery_enabled ? 'delivery-icon--ready' : ''}}">{{subscription.delivery_enabled ? '✓' : '!'}}</view>
         <view><text>{{subscription.delivery_enabled ? '定时发送已就绪' : '发送服务尚未启用'}}</text><text>{{subscription.template_id ? '每次授权可发送一次到期提醒' : '请先在服务端配置订阅消息模板 ID'}}</text></view>
@@ -67,6 +72,7 @@
       <view class="grant-count"><text>{{subscription.available_grants}}</text><view><text>可用提醒次数</text><text>微信一次性订阅授权会在发送成功后消耗</text></view></view>
       <button class="ios-button subscribe-button" disabled="{{subscribing || !subscription.template_id}}" bindtap="requestSubscription">{{subscribing ? '正在请求授权…' : '授权一次复习提醒'}}</button>
       <text wx:if="{{subscription.last_sent_label}}" class="last-delivery">上次发送：{{subscription.last_sent_label}} · {{subscription.last_delivery_status}}</text>
+      </block>
     </view>
 
     <view class="scope-card">

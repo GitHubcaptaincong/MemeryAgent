@@ -86,6 +86,7 @@ Page({
     overview: { due_count: 0, total_active: 0, next_due_at: null, next_due_label: '' },
     history: [],
     dailyPlan: decorateDailyPlan(null),
+    planAvailable: true,
     evaluationWaitingLong: false,
     ratings: ratingsFor(null),
   },
@@ -111,14 +112,19 @@ Page({
   async loadReviewData() {
     this.setData({ loading: true, error: '' })
     try {
-      const [allQueue, overview, history, planPayload] = await Promise.all([
+      const [allQueue, overview, history, planResult] = await Promise.all([
         api.get('/review/queue?limit=100'),
         api.get('/review/overview'),
         api.get('/review/history?limit=10'),
-        api.get('/review/daily-plan'),
+        api.get('/review/daily-plan')
+          .then((value) => ({ value }))
+          .catch((error) => ({ error })),
       ])
-      const dailyPlan = decorateDailyPlan(planPayload)
-      const queue = this.data.showAllDue ? allQueue : plannedQueueFor(allQueue, dailyPlan)
+      const planAvailable = !planResult.error
+      const dailyPlan = decorateDailyPlan(planAvailable ? planResult.value : null)
+      const queue = this.data.showAllDue || !planAvailable
+        ? allQueue
+        : plannedQueueFor(allQueue, dailyPlan)
       const previousCardId = this.data.activeCard && this.data.activeCard.id
       const previousIndex = queue.findIndex((card) => card.id === previousCardId)
       const activeIndex = previousIndex >= 0
@@ -139,6 +145,7 @@ Page({
         overview: { ...overview, next_due_label: nextDueLabel(overview.next_due_at) },
         history: historyFor(history),
         dailyPlan,
+        planAvailable,
         evaluationWaitingLong: false,
         ratings: ratingsFor(activeCard),
       })

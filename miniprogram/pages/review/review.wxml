@@ -11,7 +11,16 @@
   <view wx:if="{{error}}" class="error-banner">{{error}}</view>
   <view wx:if="{{lastScheduleText}}" class="success-banner">✓ {{lastScheduleText}}</view>
 
-  <view wx:if="{{!loading}}" class="ios-card plan-card">
+  <view wx:if="{{!loading && !planAvailable}}" class="ios-card plan-card">
+    <view class="plan-card__top">
+      <view><text>TODAY</text><text>今日计划暂不可用</text></view>
+    </view>
+    <view class="plan-card__footer">
+      <text>云端服务正在更新，当前已按全部到期内容展示，复习仍可正常进行。</text>
+    </view>
+  </view>
+
+  <view wx:elif="{{!loading}}" class="ios-card plan-card">
     <view class="plan-card__top">
       <view><text>TODAY</text><text>今日计划</text></view>
       <text bindtap="goToInsights">学习统计 ›</text>

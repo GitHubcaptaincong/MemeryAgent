@@ -31,6 +31,7 @@ Page({
       last_sent_at: null,
       last_sent_label: '',
     },
+    subscriptionStatusAvailable: true,
   },
 
   onShow() {
@@ -46,14 +47,21 @@ Page({
   async loadPreferences() {
     this.setData({ loading: true, error: '' })
     try {
-      const [form, subscription] = await Promise.all([
+      const [form, subscriptionResult] = await Promise.all([
         api.get('/reminders/preferences'),
-        api.get('/reminders/status'),
+        api.get('/reminders/status')
+          .then((value) => ({ value }))
+          .catch((error) => ({ error })),
       ])
+      const subscriptionStatusAvailable = !subscriptionResult.error
+      const subscription = subscriptionStatusAvailable
+        ? subscriptionResult.value
+        : this.data.subscription
       this.setData({
         loading: false,
         form,
         subscription: { ...subscription, last_sent_label: sentAtLabel(subscription.last_sent_at) },
+        subscriptionStatusAvailable,
       })
     } catch (error) {
       this.setData({ loading: false, error: error.message })
