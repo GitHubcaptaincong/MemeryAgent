@@ -3,6 +3,7 @@
   "compileType": "miniprogram",
   "libVersion": "trial",
   "miniprogramRoot": "miniprogram/",
+  "cloudfunctionRoot": "cloudfunctions/",
   "projectname": "memory-agent-mini",
   "setting": {
     "urlCheck": false,
