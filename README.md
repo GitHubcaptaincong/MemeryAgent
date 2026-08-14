@@ -1,56 +1,98 @@
-# Memory Agent MVP
+# Memory Agent
 
-当前 MVP 已跑通“学习材料 → Agent 整理 → 用户确认 → 主动回忆 → 用户自评 → 下次复习”的纵向闭环。
+一个把学习材料转化为可验证知识单元，并通过主动回忆和间隔重复帮助用户持续复习的 AI 学习助手。
 
-## 已实现
+## 项目介绍
 
-- 文本/Markdown 材料输入，单次最多 10,000 字。
-- Python 3.12 + FastAPI + SQLAlchemy 后端。
-- PostgreSQL + pgvector + pg_trgm 数据模型；SQLite 可用于本地无依赖测试。
-- 持久化 Agent Run、事件流、工具调用、后台任务和草稿证据。
-- 有预算的 Agent 循环：读取材料 → 定位逐字证据 → 生成草稿 → 结构校验。
-- 原文引用由 `source_locate_quotes` 返回权威字符区间，模型不再自行数字符。
-- 模型超时、限流和 5xx 自动进入 `retry_wait`；Worker 也可接管过期租约。
-- 600 字以内默认走短内容快速通道：一次紧凑模型生成，由代码补全字段、定位证据并校验。
-- 原文先持久化再启动 AI 整理；图形界面会立即显示“原文已记录”，模型等待不会阻塞记录结果。
-- SSE 每 2 秒发送一次临时进度脉冲，界面展示当前动作、耗时、工具结果和重[.env](.env)试原因。
-- 只读 Skill 路由与三个初始 Skills。
-- SSE 实时运行轨迹。
-- 1–10 个开放问答知识单元及来源字符区间。
-- 草稿确认与长期记忆审批分离；只有批准后的候选才写入长期记忆。
-- 草稿确认后幂等创建复习卡，到期队列按 `due_at` 拉取。
-- 开放题作答、答案要点与原文证据对照、1–4 档用户自评。
-- 回答与评分以不可变 `review_events` 保存，复习卡只作为当前调度投影。
-- 已接入官方 `py-fsrs 6.3.1`；使用 1/10 分钟学习步骤、10 分钟重学步骤、0.9 目标记忆率，并关闭随机抖动以支持确定性重放。
-- 评分前由服务端返回四档真实调度预览；评分后可查看最近复习、下一次到期和当前到期数量。
-- 可开关的异步 AI 回答评估：提交回答立即返回，后台给出已覆盖要点、缺失点和 1–4 级建议；用户评分始终是 FSRS 的唯一最终输入。
-- 学习统计：按不可变评分事件计算自评掌握趋势、可解释薄弱项与未来 14 天负载建议；每日上限只影响展示，不改 FSRS 到期时间。
-- 旧 MVP 卡片保留原到期时间，并在下一次评分时从不可变 `review_rated` 事件重放迁移到 FSRS；历史不完整时拒绝静默重置。
-- 提醒偏好持久化：启用状态、每日时间、数量上限、逾期策略和时区。
-- 微信一次性订阅授权、提醒额度、发送去重与结果回写；`cloudfunctions/reminder-dispatch` 每 5 分钟触发微信发送。
-- Vue 3 移动 H5：复用微信小程序的信息架构和 iOS 风格，用于 GitHub Pages 公开演示与浏览器调试。
-- 原生微信小程序客户端：快速记录、Agent 进度、复习作答与提醒设置。
+收藏文章、记录笔记并不等于真正掌握。很多学习工具停留在“保存内容”或“生成摘要”，用户仍然缺少可以主动回答的问题、可信的原文依据，以及明确的下一次复习时间。
 
-当前已支持通过 OpenAI-compatible Responses API 接入 CLIProxy，并保留 `FakeModelAdapter` 作为确定性回归基线。外部网页搜索、Embedding 生成、FSRS 个性化参数训练和非微信渠道的系统通知尚未接入。
+Memory Agent 围绕这个问题构建了一条完整学习闭环：
 
-## 一键启动（推荐）
+```text
+输入学习材料
+  → Agent 拆分知识单元并定位原文证据
+  → 用户审阅和确认
+  → 开放题主动回忆
+  → AI 提供覆盖点与缺失点建议
+  → 用户最终自评
+  → FSRS 安排下一次复习
+```
 
-前提：Docker Desktop 已启动。
+项目不是通用聊天机器人。Agent 负责在受约束的工具流程中整理材料，生成结果必须经过结构校验并保留原文证据；未经用户确认的知识单元不会进入复习队列，AI 建议也不会覆盖用户对掌握程度的最终判断。
 
-先创建本地环境文件并填写代理 Key。`.env` 已被 Git 忽略，不要提交：
+## 核心能力
+
+### 材料整理与知识生成
+
+- 支持文本和 Markdown 材料，单次最多 10,000 字。
+- 原文先持久化，再启动后台 AI 整理，模型等待或重试不会丢失用户输入。
+- 使用有预算的 Agent 流程完成材料读取、Skill 路由、证据定位、草稿生成和结构校验。
+- 将材料拆分为 1–10 个可独立复习的开放问答知识单元。
+- 由服务端 `source_locate_quotes` 工具计算权威字符区间，避免让模型自行猜测证据坐标。
+- 600 字以内材料默认使用快速通道，减少不必要的多轮模型调用。
+- 草稿确认与长期个性化记忆审批分离，Agent 只能读取已批准且仍有效的记忆。
+
+### 主动回忆与复习调度
+
+- 草稿确认后幂等创建复习卡，并按到期时间生成复习队列。
+- 支持开放题作答、答案要点和原文证据对照，以及 1–4 档用户自评。
+- 使用官方 `py-fsrs 6.3.1` 计算下一次复习时间，并在评分前展示四档调度预览。
+- 回答和评分以不可变 `review_events` 保存，当前卡片状态可由历史事件重放。
+- 旧调度状态迁移时保留原到期时间；历史不完整时拒绝静默重置。
+- 提供自评趋势、可解释薄弱项和未来 14 天复习负载建议。
+
+### AI 回答评估与提醒
+
+- 回答提交后异步生成覆盖点、缺失点和评分建议，不阻塞用户继续评分。
+- 用户评分是 FSRS 的唯一最终输入，AI 评估失败时可降级为纯自评流程。
+- 支持提醒时间、每日建议上限、逾期策略和时区等偏好。
+- 实现微信一次性订阅授权额度、提醒任务领取、发送去重和结果回写。
+
+### 客户端
+
+- 原生微信小程序：快速记录、Agent 进度、草稿确认、主动复习、学习统计和提醒设置。
+- Vue 3 移动 H5：复用小程序的信息架构，便于浏览器调试和独立部署。
+- Agent 运行期间展示可审计的计划、动作、工具结果和恢复原因，不展示或伪造模型隐式思维链。
+
+### 可靠性与恢复
+
+- 持久化 Agent Run、事件流、工具调用、后台任务、Checkpoint 和草稿证据。
+- SSE 持续推送运行状态；没有新业务事件时发送临时进度脉冲。
+- 仅对网络异常、超时、HTTP 408/409/425/429 和 5xx 执行自动重试。
+- Worker 使用数据库租约领取任务，并可接管过期运行。
+- 自动恢复采用 `fresh_context_replay`，从已持久化的业务输入、Skills、已批准记忆和预算重新执行。
+- 工具调用和关键写入使用幂等键，避免重试产生重复副作用。
+
+## 技术栈
+
+| 层次 | 技术 |
+| --- | --- |
+| 微信客户端 | 原生微信小程序 |
+| Web 客户端 | Vue 3、Vite |
+| 后端 | Python 3.12、FastAPI、SQLAlchemy、Pydantic |
+| 数据库 | PostgreSQL、pgvector、pg_trgm；测试可使用 SQLite |
+| AI 接入 | OpenAI-compatible Responses API；当前实现包含 CLIProxy 适配器和 Fake Adapter |
+| 复习调度 | py-fsrs 6.3.1 |
+| 任务与事件 | PostgreSQL 任务租约、SSE、不可变业务事件 |
+| 工程化 | Alembic、Pytest、Docker Compose |
+
+## 快速启动
+
+推荐使用 Docker Compose 启动 API、Worker、PostgreSQL 和移动 H5。
+
+### 前置条件
+
+- Docker Desktop
+- 一个可访问的 OpenAI-compatible Responses API 服务
+
+复制环境变量模板并填写本地模型服务的访问凭证：
 
 ```powershell
 Copy-Item .env.example .env
-# 编辑 .env 中的 CLI_PROXY_API_KEY；不要把真实值提交到仓库
+# 编辑 .env 中的 CLI_PROXY_API_KEY，以及需要覆盖的模型配置。
 ```
 
-CLIProxy 的访问地址按运行位置区分：
-
-- 后端直接运行在 Windows 主机时使用 `http://127.0.0.1:8317/v1`。
-- 后端运行在 Docker 容器时使用 `http://host.docker.internal:8317/v1`，Compose 已内置该配置。
-- 当前默认模型是 `gpt-5.4-mini`；可通过 `.env` 中的 `CLI_PROXY_MODEL` 切换为 `gpt-5.4` 或 `gpt-5.5`。
-
-本机验证时请按运行位置选择上面的回环或 Docker 主机地址；不要把个人网络地址写入仓库。
+默认 Compose 配置通过 `http://host.docker.internal:8317/v1` 从容器访问宿主机模型服务。可以在 `compose.yml` 或自己的部署环境中替换为其他可访问地址；不要提交真实密钥。
 
 ```powershell
 docker compose up --build
@@ -60,12 +102,8 @@ docker compose up --build
 
 - 移动 H5：http://localhost:5173
 - API 文档：http://localhost:8000/docs
-- API 健康检查：http://localhost:8000/api/v1/health
-- API 就绪检查：http://localhost:8000/api/v1/ready
-
-微信小程序请在微信开发者工具中导入仓库根目录。配置与真机联调说明见 [miniprogram/README.md](./miniprogram/README.md)。
-
-公开仓库中的 `project.config.json` 使用 `touristappid`。首次导入后，请在微信开发者工具“详情 -> 基本信息”中填写自己的 AppID；开发者工具会将它保存到已被 Git 忽略的 `project.private.config.json`。
+- 健康检查：http://localhost:8000/api/v1/health
+- 就绪检查：http://localhost:8000/api/v1/ready
 
 停止服务但保留数据库：
 
@@ -75,7 +113,7 @@ docker compose stop
 
 ## 本地开发
 
-后端：
+### 后端
 
 ```powershell
 py -3.12 -m venv .venv
@@ -85,11 +123,13 @@ $env:APP_AUTO_CREATE_SCHEMA="true"
 $env:APP_MODEL_PROVIDER="cli_proxy"
 $env:APP_MODEL_BASE_URL="http://127.0.0.1:8317/v1"
 $env:APP_MODEL_API_KEY="<local-proxy-key>"
-$env:APP_MODEL_NAME="gpt-5.4-mini"
+$env:APP_MODEL_NAME="<model-name>"
 .\.venv\Scripts\memory-agent-api.exe
 ```
 
-前端（另一个终端）：
+不接入真实模型时，可以将 `APP_MODEL_PROVIDER` 设置为 `fake`，用于本地流程调试和确定性回归测试。
+
+### Web 客户端
 
 ```powershell
 Set-Location .\frontend
@@ -97,93 +137,55 @@ npm install
 npm run dev
 ```
 
-## CloudBase 云托管部署
+### 微信小程序
 
-仓库根目录提供了云托管专用 `Dockerfile`。在 CloudBase 控制台通过本地代码部署时：
+在微信开发者工具中导入仓库根目录。公开配置使用 `touristappid`，本地 AppID 和接口地址应保存在个人配置中，不要提交模型 Key、数据库密码或微信 AppSecret。
 
-1. 代码包类型选择“文件夹”，上传整个项目根目录。
-2. Dockerfile 目录留空或填写 `.`。
-3. Dockerfile 名称填写 `Dockerfile`。
-4. 服务端口填写 `8000`。
-5. 健康检查路径填写 `/api/v1/health`。
+具体导入和联调步骤见 [微信小程序说明](./miniprogram/README.md)。
 
-必须在云托管服务中配置环境变量，不要写入代码：
+## 部署说明
 
-```text
-APP_DATABASE_URL=postgresql+psycopg://<user>:<password>@<host>:5432/<database>
-APP_AUTH_MODE=wechat
-APP_WECHAT_APP_ID=<your-mini-program-app-id>
-APP_WECHAT_CLAIM_LOCAL_USER=false
-APP_MODEL_PROVIDER=cli_proxy
-APP_MODEL_BASE_URL=https://<cloud-accessible-model-service>/v1
-APP_MODEL_API_KEY=<secret>
-APP_MODEL_NAME=gpt-5.4-mini
-APP_ANSWER_EVALUATION_TIMEOUT_SECONDS=15
-APP_ANSWER_EVALUATION_MAX_OUTPUT_TOKENS=1000
-APP_ANSWER_EVALUATION_REASONING_EFFORT=none
-APP_INLINE_WORKER=true
-APP_AUTO_CREATE_SCHEMA=false
-APP_SKILL_ROOT=/skills
-# 完成真实模板与云函数配置后再开启：
-APP_REMINDER_DELIVERY_ENABLED=true
-APP_REMINDER_DISPATCH_TOKEN=<long-random-shared-secret>
-APP_WECHAT_SUBSCRIBE_TEMPLATE_ID=<your-template-id>
-APP_WECHAT_SUBSCRIBE_PAGE=pages/review/review
-```
+项目不绑定特定云厂商，可以按照以下边界选择自己的部署方式：
 
-当前本机 CLIProxy 地址不能从 CloudBase 容器访问。云端必须使用公网或同 VPC 可访问的模型服务地址；只想先验证部署时，可以临时设置 `APP_MODEL_PROVIDER=fake`，但这不会调用真实模型。
+- FastAPI API 和 Worker 可以部署为容器或常驻进程，并连接 PostgreSQL。
+- 部署前执行 Alembic migration，不要依赖开发环境的自动建表。
+- Vue H5 执行 `npm run build` 后可以部署到任意静态站点或 Web Server。
+- 微信小程序可以通过公网 HTTPS API 或平台提供的容器调用能力访问后端。
+- 微信订阅提醒需要外部定时任务触发，不能依赖可能缩容或重启的 API 进程内定时器。
+- 数据库连接、模型凭证、微信密钥和提醒共享密钥应通过环境变量或密钥服务提供。
 
-根目录 Dockerfile 会在启动时执行 `alembic upgrade head`，因此目标 PostgreSQL 必须在容器启动前可连接。`frontend/` 和 `miniprogram/` 不需要由这个容器提供；小程序只调用云托管暴露的 FastAPI 地址。
-
-微信云托管模式下，后端读取 `wx.cloud.callContainer` 自动注入的 `X-WX-OPENID` 与 `X-WX-APPID`，映射为内部用户 UUID。已有单用户数据的首次认领和防误领步骤见 [微信 OpenID 用户隔离](./docs/wechat-user-isolation.md)。本地开发继续使用默认的 `APP_AUTH_MODE=local`。
-
-订阅消息必须由用户点击授权，并由外部定时云函数触发；完整模板、环境变量、部署与验收步骤见 [学习辅助模块部署](./docs/learning-assistance.md)。
-
-## GitHub Pages 公开演示与 Neon
-
-仓库包含 GitHub Pages 自动部署工作流。`main` 分支更新前端后，会构建一个完全使用脱敏示例数据的只读演示版；该版本不会连接后端、数据库或模型服务。
-
-首次发布时，在 GitHub 仓库 `Settings -> Pages` 中将 Source 选择为 `GitHub Actions`。本仓库的默认访问地址为：
-
-```text
-https://githubcaptaincong.github.io/MemeryAgent/
-```
-
-CloudBase 后端继续使用 PostgreSQL。低频个人展示可以使用 Neon Free，将 Neon 连接串仅保存到 CloudBase 的 `APP_DATABASE_URL` 环境变量。完整步骤、CORS 配置及上线边界见 [低成本公开演示部署](./docs/deployment-github-neon.md)。
+完整环境变量示例见 [.env.example](./.env.example)。
 
 ## 验证
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest .\backend\tests -q
-Set-Location .\frontend
-npm run build
+npm --prefix .\frontend run build
 ```
 
-## 关键目录
+后端测试覆盖主要 API 闭环、证据定位、模型协议、任务恢复、FSRS 调度、回答评估、学习统计、微信身份隔离和提醒幂等。
+
+## 项目结构
 
 ```text
-backend/src/memory_agent/   FastAPI、Agent Runtime、工具、记忆与任务队列
+backend/src/memory_agent/   FastAPI、Agent Runtime、工具、记忆、复习与任务队列
 backend/migrations/         Alembic 数据库迁移
-frontend/src/               微信小程序风格的移动 H5 与公开演示
+backend/tests/              后端自动化测试
+frontend/src/               Vue 3 移动 H5
 miniprogram/                原生微信小程序客户端
 cloudfunctions/             微信订阅消息定时发送桥接
-project.config.json         微信开发者工具项目配置
 .agents/skills/             Agent 只读 Skills
-docs/                       阶段一技术设计
+docs/                       架构、可靠性、复习与部署边界文档
 infra/postgres/             PostgreSQL 扩展初始化
 ```
 
-## 重要边界
+## 当前边界
 
-- `agent_events` 保存可审计事件和决策摘要，不保存模型隐式思维链。
-- “Agent 在做什么”展示的是可验证的计划、动作和工具摘要，不展示或伪造模型原始思维链。
-- 用户业务知识、Agent 运行事件、长期个性化记忆是三类不同数据。
-- Agent 只能读取已批准且有效的长期记忆。
-- 草稿确认不会自动授权写长期记忆；记忆候选必须再次批准。
-- Agent 运行时不能修改 Skills。
-- 用户自评是当前复习调度的最终输入；AI 只可在后续提供建议，不能静默覆盖用户选择。
-- 微信提醒每次发送消耗一次用户授权；网络结果不确定时不盲目重发。真实发送只有在模板、字段映射、共享密钥和定时云函数全部配置后才生效。
-- 当前调度器是 `fsrs-6.3.1-v1`；调度配置单独版本化，后续升级必须通过历史事件重放，不能静默套用新参数。
-- 模型请求使用 `store=false`；Provider 回放项只存在于本次运行的工作内存，原始推理项不写入事件、Checkpoint 或长期记忆。
-- 自动恢复使用 `fresh_context_replay`：从已持久化的业务输入重新执行，保留事件、工具调用和 Token 预算，但不恢复模型隐式推理链。
-- 只有网络异常、超时、HTTP 408/409/425/429 和 5xx 会自动重试；协议错误及普通 4xx 直接失败，避免无意义重放。
+- 当前材料输入只支持文本和 Markdown，尚未接入网页链接、图片、PDF、音视频或真实外部搜索。
+- PostgreSQL 已包含 pgvector/pg_trgm 数据基础，但 Embedding 生成和完整混合检索尚未接入。
+- FSRS 使用版本化的通用配置，尚未根据个人历史数据训练参数。
+- 微信订阅消息代码已实现，但真实发送仍需要模板、字段映射、定时任务和真机授权配置。
+- `agent_events` 只保存可审计事件和决策摘要，不保存模型隐式推理链。
+- 模型请求使用 `store=false`；Provider 临时状态不作为业务记忆或长期记忆保存。
+
+更详细的设计与验证记录见 [docs](./docs/)。
