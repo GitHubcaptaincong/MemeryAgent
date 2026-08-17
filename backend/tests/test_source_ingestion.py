@@ -11,9 +11,16 @@ from memory_agent.source_ingestion import (
     FetchedSource,
     HttpResponse,
     SourceFetchError,
+    detect_standalone_url,
     extract_readable_content,
     fetch_public_source,
 )
+
+
+def test_detect_standalone_url_only_opens_an_explicit_single_link() -> None:
+    assert detect_standalone_url("  https://example.com/article  ") == "https://example.com/article"
+    assert detect_standalone_url("请参考 https://example.com/article") is None
+    assert detect_standalone_url("不是链接") is None
 
 
 def test_extract_readable_html_ignores_scripts_and_keeps_structure() -> None:
@@ -97,11 +104,11 @@ def test_long_text_and_public_url_sources_keep_origin_evidence(monkeypatch: pyte
     with TestClient(app) as client:
         long_text = "长文本知识段落。" * 1_500
         long_response = client.post(
-            "/api/v1/sources",
+            "/api/v1/sources/resolve",
             json={
                 "title": "长文本",
                 "learning_goal": "验证超过旧上限的材料可以保存",
-                "content": long_text,
+                "input": long_text,
                 "content_type": "text",
                 "web_access_allowed": False,
             },
@@ -123,9 +130,9 @@ def test_long_text_and_public_url_sources_keep_origin_evidence(monkeypatch: pyte
         assert too_long_response.status_code == 422
 
         source_response = client.post(
-            "/api/v1/sources/from-url",
+            "/api/v1/sources/resolve",
             json={
-                "url": "https://example.com/original",
+                "input": "https://example.com/original",
                 "learning_goal": "理解主动回忆与间隔复习",
                 "web_access_allowed": False,
             },

@@ -6,31 +6,6 @@
   padding-top: 8rpx;
 }
 
-.source-mode-tabs {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8rpx;
-  padding: 18rpx 22rpx;
-}
-
-.source-mode-tab {
-  margin: 0;
-  border-radius: 12rpx;
-  background: #f2f2f7;
-  color: #636366;
-  font-size: 25rpx;
-  line-height: 72rpx;
-}
-
-.source-mode-tab::after {
-  border: 0;
-}
-
-.source-mode-tab--active {
-  background: #1c1c1e;
-  color: #fff;
-}
-
 .field-row {
   padding: 12rpx 30rpx;
 }
@@ -63,23 +38,6 @@
   bottom: 22rpx;
   color: #aeaeb2;
   font-size: 22rpx;
-}
-
-.url-source-field {
-  padding-top: 30rpx;
-  padding-bottom: 30rpx;
-}
-
-.url-source-input {
-  text-align: left;
-}
-
-.url-source-help {
-  display: block;
-  margin-top: 18rpx;
-  color: #8e8e93;
-  font-size: 22rpx;
-  line-height: 1.55;
 }
 
 .switch-setting {
@@ -160,9 +118,15 @@
 
 .agent-head {
   display: grid;
-  grid-template-columns: 78rpx 1fr;
+  grid-template-columns: 78rpx 1fr 36rpx;
   gap: 20rpx;
   align-items: center;
+}
+
+.agent-disclosure {
+  color: #8e8e93;
+  font-size: 28rpx;
+  text-align: right;
 }
 
 .agent-orb {
@@ -232,6 +196,10 @@
   gap: 10rpx;
   padding: 18rpx 0;
   border-top: 1rpx solid #38383a;
+}
+
+.event-list {
+  max-height: 420rpx;
 }
 
 .event-index {

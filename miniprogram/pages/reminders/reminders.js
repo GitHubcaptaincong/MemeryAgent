@@ -8,6 +8,20 @@ function sentAtLabel(value) {
   return `${date.getMonth() + 1} 月 ${date.getDate()} 日 ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
 }
 
+function localTimezone() {
+  try {
+    if (typeof Intl !== 'undefined' && Intl.DateTimeFormat) {
+      const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone
+      if (timezone === 'UTC' || (typeof timezone === 'string' && timezone.includes('/'))) {
+        return timezone
+      }
+    }
+  } catch (error) {
+    // Some older WeChat runtimes do not provide full Intl timezone data.
+  }
+  return 'Asia/Shanghai'
+}
+
 Page({
   data: {
     loading: true,
@@ -32,6 +46,7 @@ Page({
       last_sent_label: '',
     },
     subscriptionStatusAvailable: true,
+    subscriptionAuthorizationEnabled: false,
   },
 
   onShow() {
@@ -57,9 +72,10 @@ Page({
       const subscription = subscriptionStatusAvailable
         ? subscriptionResult.value
         : this.data.subscription
+      const timezone = localTimezone()
       this.setData({
         loading: false,
-        form,
+        form: { ...form, timezone },
         subscription: { ...subscription, last_sent_label: sentAtLabel(subscription.last_sent_at) },
         subscriptionStatusAvailable,
       })

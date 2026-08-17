@@ -6,14 +6,11 @@ const apiBase = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
 const isPublicDemo = import.meta.env.VITE_PUBLIC_DEMO === 'true'
 const demoReadOnlyMessage = '公开演示模式不会连接后端、写入数据或调用模型。'
 const sourceMaxChars = 50000
-const sourceMode = ref('text')
 const form = ref({
   title: '',
   learning_goal: '',
   content: '',
-  url: '',
   content_type: 'markdown',
-  web_access_allowed: false,
 })
 const busy = ref(false)
 const error = ref('')
@@ -22,6 +19,7 @@ const events = ref([])
 const draft = ref(null)
 const memoryCandidates = ref([])
 const savedSource = ref(null)
+const tasksExpanded = ref(true)
 const livePulse = ref(null)
 const startedAt = ref(null)
 const elapsedSeconds = ref(0)
@@ -79,9 +77,9 @@ const stateLabels = {
 }
 
 const charCount = computed(() => form.value.content.length)
-const sourceReady = computed(() => sourceMode.value === 'url'
-  ? Boolean(form.value.url.trim())
-  : Boolean(form.value.content.trim()) && charCount.value <= sourceMaxChars)
+const sourceReady = computed(() => Boolean(form.value.content.trim()) && charCount.value <= sourceMaxChars)
+const inputLooksLikeUrl = computed(() => /^https?:\/\/\S+$/i.test(form.value.content.trim()))
+const runFinished = computed(() => ['awaiting_user', 'completed', 'failed', 'cancelled', 'budget_exhausted'].includes(run.value?.state))
 const progress = computed(() => {
   const states = ['queued', 'ingesting', 'retrieving_memory', 'routing_skills', 'planning', 'executing', 'drafting', 'reviewing', 'awaiting_user']
   const index = states.indexOf(run.value?.state)
@@ -140,9 +138,7 @@ async function startRun() {
     return
   }
   if (!sourceReady.value) {
-    error.value = sourceMode.value === 'url'
-      ? '请先填写一个公开的 HTTP 或 HTTPS 链接。'
-      : `请输入材料正文，且不要超过 ${sourceMaxChars.toLocaleString()} 字。`
+    error.value = `请输入长文本或公开链接，且不要超过 ${sourceMaxChars.toLocaleString()} 字。`
     return
   }
   busy.value = true
@@ -151,6 +147,7 @@ async function startRun() {
   draft.value = null
   memoryCandidates.value = []
   savedSource.value = null
+  tasksExpanded.value = true
   startedAt.value = Date.now()
   elapsedSeconds.value = 0
   lastSignalAt.value = Date.now()
@@ -159,23 +156,15 @@ async function startRun() {
   startClock()
   try {
     const saveStarted = performance.now()
-    const sourcePayload = sourceMode.value === 'url'
-      ? {
-          url: form.value.url.trim(),
-          title: form.value.title.trim() || null,
-          learning_goal: form.value.learning_goal.trim() || '准确整理并记住这个公开链接的内容',
-          web_access_allowed: form.value.web_access_allowed,
-        }
-      : {
-          title: form.value.title.trim() || '快速记录',
-          learning_goal: form.value.learning_goal.trim() || '准确整理并记住这段内容',
-          content: form.value.content,
-          content_type: form.value.content_type,
-          web_access_allowed: form.value.web_access_allowed,
-        }
-    const source = await api(sourceMode.value === 'url' ? '/api/v1/sources/from-url' : '/api/v1/sources', {
+    const source = await api('/api/v1/sources/resolve', {
       method: 'POST',
-      body: JSON.stringify(sourcePayload),
+      body: JSON.stringify({
+        input: form.value.content,
+        title: form.value.title.trim() || null,
+        learning_goal: form.value.learning_goal.trim() || '准确整理并记住这份材料',
+        content_type: form.value.content_type,
+        web_access_allowed: false,
+      }),
     })
     savedSource.value = {
       ...source,
@@ -217,6 +206,7 @@ function openStream(runId) {
   eventSource.addEventListener('stream.closed', async () => {
     await refreshRun()
     if (run.value?.state === 'awaiting_user') await loadDraft()
+    if (runFinished.value) tasksExpanded.value = false
     busy.value = false
     stopClock()
     closeStream()
@@ -225,6 +215,7 @@ function openStream(runId) {
     await refreshRun().catch(() => {})
     if (run.value?.state === 'awaiting_user') await loadDraft().catch(() => {})
     if (['awaiting_user', 'completed', 'failed', 'cancelled', 'budget_exhausted'].includes(run.value?.state)) {
+      tasksExpanded.value = false
       busy.value = false
       stopClock()
       closeStream()
@@ -239,6 +230,9 @@ function consumeEvent(message) {
   lastSignalAt.value = Date.now()
   if (item.event_type === 'run.state_changed') {
     run.value = { ...run.value, state: item.payload.state }
+    if (['awaiting_user', 'completed', 'failed', 'cancelled', 'budget_exhausted'].includes(item.payload.state)) {
+      tasksExpanded.value = false
+    }
   }
   if (item.event_type === 'draft.created') loadDraft().catch(() => {})
 }
@@ -698,32 +692,19 @@ onMounted(() => {
         <form class="source-panel" @submit.prevent="startRun">
           <div class="section-heading">
             <span>01</span>
-            <div><h2>投递学习材料</h2><p>支持最多 50,000 字的长文本，或解析一个公开网页链接。</p></div>
+            <div><h2>投递学习材料</h2><p>在同一个输入框粘贴长文本或公开链接，Agent 会自动识别。</p></div>
           </div>
 
-          <div class="source-mode-tabs" role="tablist" aria-label="材料类型">
-            <button type="button" :class="{ active: sourceMode === 'text' }" :disabled="isPublicDemo || busy" @click="sourceMode = 'text'">粘贴长文本</button>
-            <button type="button" :class="{ active: sourceMode === 'url' }" :disabled="isPublicDemo || busy" @click="sourceMode = 'url'">公开链接</button>
-          </div>
           <label>标题 <small class="optional">可选</small><input v-model="form.title" :disabled="isPublicDemo" maxlength="300" placeholder="留空时自动生成" /></label>
           <label>这次想学会什么？ <small class="optional">可选</small><input v-model="form.learning_goal" :disabled="isPublicDemo" maxlength="500" placeholder="留空时自动整理并记住内容" /></label>
-          <label v-if="sourceMode === 'text'" class="content-field">
-            <span>材料正文 <small :class="{ danger: charCount > sourceMaxChars }">{{ charCount.toLocaleString() }} / {{ sourceMaxChars.toLocaleString() }}</small></span>
-            <textarea v-model="form.content" :disabled="isPublicDemo" :maxlength="sourceMaxChars" placeholder="粘贴长文章、课程笔记或自己的思考……"></textarea>
-          </label>
-          <label v-else class="content-field url-field">
-            <span>公开网页地址 <small>仅读取你提交的这个链接</small></span>
-            <input v-model="form.url" :disabled="isPublicDemo" maxlength="2048" inputmode="url" placeholder="https://example.com/article" />
-            <small class="field-help">不支持登录页、内网地址、文件下载和依赖登录态的内容；不会自动搜索其他网页。</small>
-          </label>
-          <label class="switch-row">
-            <input v-model="form.web_access_allowed" :disabled="isPublicDemo" type="checkbox" />
-            <span class="switch"></span>
-            <span><strong>允许外部检索</strong><small>默认关闭；MVP 尚未接入真实搜索工具</small></span>
+          <label class="content-field">
+            <span>材料内容 <small :class="{ danger: charCount > sourceMaxChars }">{{ charCount.toLocaleString() }} / {{ sourceMaxChars.toLocaleString() }}</small></span>
+            <textarea v-model="form.content" :disabled="isPublicDemo" :maxlength="sourceMaxChars" placeholder="粘贴长文本，或直接粘贴一个 https:// 开头的公开链接……"></textarea>
+            <small class="field-help">{{ inputLooksLikeUrl ? '已识别为公开链接：提交后将定向读取并解析正文。' : '仅当全部内容是单个 HTTP/HTTPS 链接时才会打开；其他内容按文本保存。' }}</small>
           </label>
           <p v-if="error" class="error">{{ error }}</p>
           <button class="primary" :disabled="isPublicDemo || busy || !sourceReady">
-            <span>{{ isPublicDemo ? '公开演示不提交数据' : (busy && savedSource ? '材料已保存 · AI 后台整理中' : (busy ? (sourceMode === 'url' ? '正在解析链接' : '正在保存') : (sourceMode === 'url' ? '解析链接并整理' : (charCount <= 600 ? '快速记录并整理' : '开始生成知识草稿')))) }}</span><b>→</b>
+            <span>{{ isPublicDemo ? '公开演示不提交数据' : (busy && savedSource ? '材料已保存 · AI 后台整理中' : (busy ? '正在识别并保存材料' : (inputLooksLikeUrl ? '读取链接并整理' : (charCount <= 600 ? '快速记录并整理' : '开始生成知识草稿')))) }}</span><b>→</b>
           </button>
           <div v-if="savedSource" class="capture-receipt">
             <b>✓ {{ savedSource.origin_type === 'url' ? '网页正文已记录' : '原文已记录' }}</b>
@@ -745,11 +726,15 @@ onMounted(() => {
               <p>已用时 {{ formatElapsed(elapsedSeconds) }} · 最近反馈 {{ signalAge }} 秒前</p>
             </div>
           </div>
+          <button v-if="busy || run" type="button" class="task-list-toggle" :aria-expanded="tasksExpanded" @click="tasksExpanded = !tasksExpanded">
+            <span><strong>任务轨迹</strong><small>{{ events.length }} 项 · {{ runFinished ? '本轮已结束' : '执行中' }}</small></span>
+            <b>{{ tasksExpanded ? '收起 ↑' : '展开 ↓' }}</b>
+          </button>
           <div v-if="!run && !busy" class="empty-run">
             <div class="orbit"><span></span></div>
             <p>提交材料后，运行事件会实时出现在这里。</p>
           </div>
-          <template v-else>
+          <div v-else v-show="tasksExpanded" class="task-details">
             <div class="run-state">
               <div><small>RUN STATUS</small><strong>{{ run ? (stateLabels[run.state] || run.state) : '正在提交' }}</strong></div>
               <b>{{ progress }}%</b>
@@ -762,7 +747,7 @@ onMounted(() => {
               </li>
             </ol>
             <div v-else class="waiting-events"><i></i><span>正在建立实时事件连接，界面会持续报告状态</span></div>
-          </template>
+          </div>
         </aside>
       </section>
 

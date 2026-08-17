@@ -28,9 +28,9 @@
       <view class="setting-row {{!form.enabled ? 'setting-row--disabled' : ''}}">
           <view class="setting-copy"><text>每日建议上限</text><text>只平衡展示负载，不改 FSRS 到期时间</text></view>
         <view class="stepper">
-          <button disabled="{{!form.enabled || form.daily_limit <= 1}}" data-delta="-1" bindtap="changeLimit">−</button>
-          <text>{{form.daily_limit}}</text>
-          <button disabled="{{!form.enabled || form.daily_limit >= 100}}" data-delta="1" bindtap="changeLimit">＋</button>
+          <button aria-label="减少每日建议上限" disabled="{{!form.enabled || form.daily_limit <= 1}}" data-delta="-1" bindtap="changeLimit"><text class="stepper-icon">−</text></button>
+          <text class="stepper-value">{{form.daily_limit}}</text>
+          <button aria-label="增加每日建议上限" disabled="{{!form.enabled || form.daily_limit >= 100}}" data-delta="1" bindtap="changeLimit"><text class="stepper-icon">+</text></button>
         </view>
       </view>
       <view class="hairline"></view>
@@ -51,7 +51,7 @@
     <text class="section-label">地区</text>
     <view class="ios-card settings-group">
       <view class="setting-row">
-        <view class="setting-copy"><text>时区</text><text>用于计算每日提醒时间</text></view>
+        <view class="setting-copy"><text>时区</text><text>自动读取设备，无法识别时使用亚洲上海</text></view>
         <text class="timezone">{{form.timezone}}</text>
       </view>
     </view>
@@ -70,7 +70,7 @@
         <view><text>{{subscription.delivery_enabled ? '定时发送已就绪' : '发送服务尚未启用'}}</text><text>{{subscription.template_id ? '每次授权可发送一次到期提醒' : '请先在服务端配置订阅消息模板 ID'}}</text></view>
       </view>
       <view class="grant-count"><text>{{subscription.available_grants}}</text><view><text>可用提醒次数</text><text>微信一次性订阅授权会在发送成功后消耗</text></view></view>
-      <button class="ios-button subscribe-button" disabled="{{subscribing || !subscription.template_id}}" bindtap="requestSubscription">{{subscribing ? '正在请求授权…' : '授权一次复习提醒'}}</button>
+      <button class="ios-button subscribe-button" disabled="{{!subscriptionAuthorizationEnabled || subscribing || !subscription.template_id}}" bindtap="requestSubscription">{{subscriptionAuthorizationEnabled ? (subscribing ? '正在请求授权…' : '授权一次复习提醒') : '订阅授权暂未开放'}}</button>
       <text wx:if="{{subscription.last_sent_label}}" class="last-delivery">上次发送：{{subscription.last_sent_label}} · {{subscription.last_delivery_status}}</text>
       </block>
     </view>

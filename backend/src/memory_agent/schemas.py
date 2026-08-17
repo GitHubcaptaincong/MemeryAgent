@@ -26,6 +26,14 @@ class SourceUrlCreate(ApiModel):
     web_access_allowed: bool = False
 
 
+class SourceResolveCreate(ApiModel):
+    input: str = Field(min_length=1, max_length=50_000)
+    title: str | None = Field(default=None, min_length=1, max_length=300)
+    learning_goal: str = Field(min_length=1, max_length=500)
+    content_type: Literal["text", "markdown"] = "text"
+    web_access_allowed: bool = False
+
+
 class SourceRead(ApiModel):
     id: UUID
     title: str

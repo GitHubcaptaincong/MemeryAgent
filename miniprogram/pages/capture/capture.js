@@ -18,13 +18,10 @@ const progressByState = {
 
 Page({
   data: {
-    sourceMode: 'text',
     title: '',
     learningGoal: '',
     content: '',
-    url: '',
     charCount: 0,
-    webAccessAllowed: false,
     busy: false,
     sourceSaved: null,
     run: null,
@@ -33,6 +30,7 @@ Page({
     progress: 0,
     elapsedText: '0 秒',
     events: [],
+    tasksExpanded: true,
     draft: null,
     expandedUnitId: '',
     memoryCandidates: [],
@@ -79,28 +77,10 @@ Page({
     this.setData({ content, charCount: content.length })
   },
 
-  onUrlInput(event) {
-    this.setData({ url: event.detail.value })
-  },
-
-  setSourceMode(event) {
-    if (this.data.busy) return
-    this.setData({ sourceMode: event.currentTarget.dataset.mode, error: '' })
-  },
-
-  onWebAccessChange(event) {
-    this.setData({ webAccessAllowed: event.detail.value })
-  },
-
   async submitContent() {
     const content = this.data.content.trim()
-    const url = this.data.url.trim()
-    if (this.data.sourceMode === 'text' && !content) {
+    if (!content) {
       this.setData({ error: '先写下你想记住或理解的内容。' })
-      return
-    }
-    if (this.data.sourceMode === 'url' && !url) {
-      this.setData({ error: '先填写一个公开的 HTTP 或 HTTPS 链接。' })
       return
     }
 
@@ -114,6 +94,7 @@ Page({
       draft: null,
       memoryCandidates: [],
       events: [],
+      tasksExpanded: true,
       error: '',
       currentActivity: '正在安全保存原文',
       progress: 4,
@@ -122,23 +103,18 @@ Page({
 
     try {
       const saveStarted = Date.now()
-      const source = this.data.sourceMode === 'url'
-        ? await api.post('/sources/from-url', {
-            url,
-            title: this.data.title.trim() || null,
-            learning_goal: this.data.learningGoal.trim() || '准确整理并记住这个公开链接的内容',
-            web_access_allowed: this.data.webAccessAllowed,
-          }, { timeout: 20000 })
-        : await api.post('/sources', {
-            title: this.data.title.trim() || '快速记录',
-            learning_goal: this.data.learningGoal.trim() || '准确整理并记住这段内容',
-            content,
-            content_type: 'text',
-            web_access_allowed: this.data.webAccessAllowed,
-          })
+      const source = await api.post('/sources/resolve', {
+        input: content,
+        title: this.data.title.trim() || null,
+        learning_goal: this.data.learningGoal.trim() || '准确整理并记住这份材料',
+        content_type: 'text',
+        web_access_allowed: false,
+      }, { timeout: 20000 })
       this.setData({
         sourceSaved: { ...source, saveMs: Math.max(1, Date.now() - saveStarted) },
-        currentActivity: '原文已保存，AI 正在后台整理',
+        currentActivity: source.origin_type === 'url'
+          ? '网页正文已解析并保存，AI 正在后台整理'
+          : '原文已保存，AI 正在后台整理',
         progress: 8,
       })
 
@@ -189,22 +165,22 @@ Page({
         currentActivity: latest ? latest.label : stateLabel(run.state),
         progress: progressByState[run.state] || this.data.progress,
         elapsedText: elapsedSeconds < 60 ? `${elapsedSeconds} 秒` : `${Math.floor(elapsedSeconds / 60)} 分 ${elapsedSeconds % 60} 秒`,
-        events: allEvents.slice(-6),
+        events: allEvents.slice(-50),
       })
 
       if (run.state === 'awaiting_user') {
         await this.loadDraft(runId)
-        this.setData({ busy: false })
+        this.setData({ busy: false, tasksExpanded: false })
         return
       }
       if (run.state === 'failed' || run.state === 'cancelled' || run.state === 'budget_exhausted') {
         wx.removeStorageSync('memoryAgentActiveRunId')
-        this.setData({ busy: false, error: run.error_message || stateLabel(run.state) })
+        this.setData({ busy: false, tasksExpanded: false, error: run.error_message || stateLabel(run.state) })
         return
       }
       if (run.state === 'completed') {
         wx.removeStorageSync('memoryAgentActiveRunId')
-        this.setData({ busy: false })
+        this.setData({ busy: false, tasksExpanded: false })
         return
       }
       this.schedulePoll(1500)
@@ -229,6 +205,10 @@ Page({
   toggleUnit(event) {
     const id = event.currentTarget.dataset.id
     this.setData({ expandedUnitId: this.data.expandedUnitId === id ? '' : id })
+  },
+
+  toggleTaskList() {
+    this.setData({ tasksExpanded: !this.data.tasksExpanded })
   },
 
   async confirmDraft() {
@@ -278,14 +258,13 @@ Page({
       title: '',
       learningGoal: '',
       content: '',
-      url: '',
-      sourceMode: 'text',
       charCount: 0,
       busy: false,
       sourceSaved: null,
       run: null,
       draft: null,
       events: [],
+      tasksExpanded: true,
       memoryCandidates: [],
       error: '',
       progress: 0,

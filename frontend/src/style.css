@@ -41,12 +41,7 @@ input:focus, textarea:focus { border-color: #6c780f; }
 textarea { height: 250px; resize: vertical; border: 1px solid #aeb1aa; padding: 16px; line-height: 1.75; }
 .content-field > span { display: flex; justify-content: space-between; }
 .content-field small { color: #858b85; font: 11px ui-monospace, Consolas, monospace; }
-.source-mode-tabs { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; margin: -10px 0 24px; padding: 4px; border: 1px solid #c6c9c2; background: rgba(255,255,255,.45); }
-.source-mode-tabs button { border: 0; padding: 10px 12px; background: transparent; color: #626a64; cursor: pointer; font-family: inherit; font-size: 13px; font-weight: 600; }
-.source-mode-tabs button.active { background: #19211d; color: #f3f4ef; }
-.source-mode-tabs button:disabled { cursor: not-allowed; opacity: .55; }
-.url-field input { margin-top: 8px; }
-.url-field .field-help { display: block; margin-top: 9px; font: 400 12px/1.6 inherit; }
+.content-field .field-help { display: block; margin-top: 9px; font: 400 12px/1.6 inherit; }
 .danger, .error { color: #a64131 !important; }
 .switch-row { display: flex; align-items: center; gap: 12px; font-weight: 400; }
 .switch-row input { position: absolute; opacity: 0; }
@@ -84,6 +79,13 @@ input:disabled, textarea:disabled { color: #4f5852; -webkit-text-fill-color: #4f
 .progress { height: 3px; background: #3c4640; margin: 18px 0 30px; }
 .progress i { display: block; background: #c9de2b; height: 100%; transition: width .35s; }
 .event-list { list-style: none; padding: 0; margin: 0; max-height: 430px; overflow: auto; }
+.event-list { scrollbar-width: thin; scrollbar-color: #667169 #26302a; }
+.task-list-toggle { display: flex; width: 100%; align-items: center; justify-content: space-between; margin: 22px 0 0; border: 1px solid #3a453e; background: #202a24; color: #eef0eb; padding: 13px 14px; cursor: pointer; text-align: left; }
+.task-list-toggle span, .task-list-toggle strong, .task-list-toggle small { display: block; }
+.task-list-toggle strong { font-size: 13px; }
+.task-list-toggle small { margin-top: 4px; color: #8d9690; font: 9px ui-monospace, Consolas, monospace; }
+.task-list-toggle > b { color: #c9de2b; font-size: 11px; }
+.task-details { padding-top: 1px; }
 .event-list li { display: grid; grid-template-columns: 32px 1fr; gap: 12px; padding: 14px 0; border-top: 1px solid #364039; }
 .event-list li > span { color: #738079; font: 10px ui-monospace, Consolas, monospace; }
 .event-list strong, .event-list small { display: block; }

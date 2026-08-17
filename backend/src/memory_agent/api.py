@@ -60,6 +60,7 @@ from memory_agent.schemas import (
     RunRead,
     SourceCreate,
     SourceRead,
+    SourceResolveCreate,
     SourceUrlCreate,
 )
 from memory_agent.services import (
@@ -69,7 +70,11 @@ from memory_agent.services import (
     decide_memory_candidate,
     get_draft_for_user,
 )
-from memory_agent.source_ingestion import SourceFetchError, fetch_public_source
+from memory_agent.source_ingestion import (
+    SourceFetchError,
+    detect_standalone_url,
+    fetch_public_source,
+)
 from memory_agent.reminders import (
     claim_due_reminders,
     record_delivery_result,
@@ -388,14 +393,13 @@ def post_source(
     return SourceRead.model_validate(source)
 
 
-@router.post("/sources/from-url", response_model=SourceRead, status_code=status.HTTP_201_CREATED)
-def post_source_from_url(
+def _create_source_from_url(
+    *,
     data: SourceUrlCreate,
-    session: Session = Depends(get_session),
-    identity: IdentityContext = Depends(get_current_identity),
-) -> SourceRead:
-    user, _profile = _identity(identity)
-    settings = identity.settings
+    session: Session,
+    user_id: UUID,
+    settings: Settings,
+):
     try:
         fetched = fetch_public_source(
             data.url,
@@ -412,9 +416,9 @@ def post_source_from_url(
         ) from exc
 
     title = (data.title or fetched.title or urlsplit(fetched.final_url).hostname or "公开链接").strip()
-    source = create_source(
+    return create_source(
         session,
-        user_id=user.id,
+        user_id=user_id,
         data=SourceCreate(
             title=title[:300],
             learning_goal=data.learning_goal,
@@ -427,6 +431,61 @@ def post_source_from_url(
         retrieved_at=fetched.retrieved_at,
         origin_content_hash=fetched.response_hash,
     )
+
+
+@router.post("/sources/from-url", response_model=SourceRead, status_code=status.HTTP_201_CREATED)
+def post_source_from_url(
+    data: SourceUrlCreate,
+    session: Session = Depends(get_session),
+    identity: IdentityContext = Depends(get_current_identity),
+) -> SourceRead:
+    user, _profile = _identity(identity)
+    source = _create_source_from_url(
+        data=data,
+        session=session,
+        user_id=user.id,
+        settings=identity.settings,
+    )
+    return SourceRead.model_validate(source)
+
+
+@router.post("/sources/resolve", response_model=SourceRead, status_code=status.HTTP_201_CREATED)
+def post_source_resolve(
+    data: SourceResolveCreate,
+    session: Session = Depends(get_session),
+    identity: IdentityContext = Depends(get_current_identity),
+) -> SourceRead:
+    user, _profile = _identity(identity)
+    url = detect_standalone_url(data.input)
+    if url is not None:
+        if len(url) > 2_048:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={"code": "invalid_url", "message": "公开链接不能超过 2,048 个字符。"},
+            )
+        source = _create_source_from_url(
+            data=SourceUrlCreate(
+                url=url,
+                title=data.title,
+                learning_goal=data.learning_goal,
+                web_access_allowed=data.web_access_allowed,
+            ),
+            session=session,
+            user_id=user.id,
+            settings=identity.settings,
+        )
+    else:
+        source = create_source(
+            session,
+            user_id=user.id,
+            data=SourceCreate(
+                title=data.title or "快速记录",
+                learning_goal=data.learning_goal,
+                content=data.input,
+                content_type=data.content_type,
+                web_access_allowed=data.web_access_allowed,
+            ),
+        )
     return SourceRead.model_validate(source)
 
 

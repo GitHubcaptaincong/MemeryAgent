@@ -193,6 +193,13 @@ def extract_readable_content(body: str, content_type: str) -> tuple[str | None, 
     return parser.title, parser.text
 
 
+def detect_standalone_url(value: str) -> str | None:
+    candidate = value.strip()
+    if not re.fullmatch(r"https?://\S+", candidate, flags=re.IGNORECASE):
+        return None
+    return candidate
+
+
 def _validate_url(url: str) -> tuple[str, str, int, str]:
     normalized = url.strip()
     parsed = urlsplit(normalized)
