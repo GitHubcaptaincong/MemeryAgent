@@ -14,8 +14,15 @@ class ApiModel(BaseModel):
 class SourceCreate(ApiModel):
     title: str = Field(min_length=1, max_length=300)
     learning_goal: str = Field(min_length=1, max_length=500)
-    content: str = Field(min_length=1, max_length=10_000)
+    content: str = Field(min_length=1, max_length=50_000)
     content_type: Literal["text", "markdown"] = "text"
+    web_access_allowed: bool = False
+
+
+class SourceUrlCreate(ApiModel):
+    url: str = Field(min_length=8, max_length=2_048)
+    title: str | None = Field(default=None, min_length=1, max_length=300)
+    learning_goal: str = Field(min_length=1, max_length=500)
     web_access_allowed: bool = False
 
 
@@ -24,6 +31,10 @@ class SourceRead(ApiModel):
     title: str
     learning_goal: str
     content_type: str
+    origin_type: str
+    origin_url: str | None
+    retrieved_at: datetime | None = None
+    origin_content_hash: str | None
     char_count: int
     web_access_allowed: bool
     status: str
@@ -71,6 +82,7 @@ class EvidenceRead(ApiModel):
     end_char: int | None
     quote: str | None
     url: str | None
+    retrieved_at: datetime | None = None
 
 
 class DraftUnitRead(ApiModel):

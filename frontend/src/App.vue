@@ -5,10 +5,13 @@ import { publicDemo } from './demoData.js'
 const apiBase = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
 const isPublicDemo = import.meta.env.VITE_PUBLIC_DEMO === 'true'
 const demoReadOnlyMessage = '公开演示模式不会连接后端、写入数据或调用模型。'
+const sourceMaxChars = 50000
+const sourceMode = ref('text')
 const form = ref({
   title: '',
   learning_goal: '',
   content: '',
+  url: '',
   content_type: 'markdown',
   web_access_allowed: false,
 })
@@ -76,6 +79,9 @@ const stateLabels = {
 }
 
 const charCount = computed(() => form.value.content.length)
+const sourceReady = computed(() => sourceMode.value === 'url'
+  ? Boolean(form.value.url.trim())
+  : Boolean(form.value.content.trim()) && charCount.value <= sourceMaxChars)
 const progress = computed(() => {
   const states = ['queued', 'ingesting', 'retrieving_memory', 'routing_skills', 'planning', 'executing', 'drafting', 'reviewing', 'awaiting_user']
   const index = states.indexOf(run.value?.state)
@@ -117,7 +123,12 @@ async function api(path, options = {}) {
   })
   if (!response.ok) {
     const payload = await response.json().catch(() => ({}))
-    throw new Error(payload.detail || `请求失败（${response.status}）`)
+    const detail = payload.detail
+    throw new Error(
+      typeof detail === 'string'
+        ? detail
+        : (detail?.message || `请求失败（${response.status}）`),
+    )
   }
   return response.json()
 }
@@ -128,8 +139,10 @@ async function startRun() {
     error.value = demoReadOnlyMessage
     return
   }
-  if (!form.value.content.trim()) {
-    error.value = '请先输入想记录或学习的内容。'
+  if (!sourceReady.value) {
+    error.value = sourceMode.value === 'url'
+      ? '请先填写一个公开的 HTTP 或 HTTPS 链接。'
+      : `请输入材料正文，且不要超过 ${sourceMaxChars.toLocaleString()} 字。`
     return
   }
   busy.value = true
@@ -146,19 +159,29 @@ async function startRun() {
   startClock()
   try {
     const saveStarted = performance.now()
-    const source = await api('/api/v1/sources', {
+    const sourcePayload = sourceMode.value === 'url'
+      ? {
+          url: form.value.url.trim(),
+          title: form.value.title.trim() || null,
+          learning_goal: form.value.learning_goal.trim() || '准确整理并记住这个公开链接的内容',
+          web_access_allowed: form.value.web_access_allowed,
+        }
+      : {
+          title: form.value.title.trim() || '快速记录',
+          learning_goal: form.value.learning_goal.trim() || '准确整理并记住这段内容',
+          content: form.value.content,
+          content_type: form.value.content_type,
+          web_access_allowed: form.value.web_access_allowed,
+        }
+    const source = await api(sourceMode.value === 'url' ? '/api/v1/sources/from-url' : '/api/v1/sources', {
       method: 'POST',
-      body: JSON.stringify({
-        ...form.value,
-        title: form.value.title.trim() || '快速记录',
-        learning_goal: form.value.learning_goal.trim() || '准确整理并记住这段内容',
-      }),
+      body: JSON.stringify(sourcePayload),
     })
     savedSource.value = {
       ...source,
       save_ms: Math.max(1, Math.round(performance.now() - saveStarted)),
     }
-    livePulse.value = { message: '原文已经保存，AI 正在后台整理' }
+    livePulse.value = { message: source.origin_type === 'url' ? '网页正文已解析并保存，AI 正在后台整理' : '原文已经保存，AI 正在后台整理' }
     lastSignalAt.value = Date.now()
     run.value = await api('/api/v1/runs', {
       method: 'POST',
@@ -675,14 +698,23 @@ onMounted(() => {
         <form class="source-panel" @submit.prevent="startRun">
           <div class="section-heading">
             <span>01</span>
-            <div><h2>投递学习材料</h2><p>本阶段支持文本与 Markdown，最多 10,000 字。</p></div>
+            <div><h2>投递学习材料</h2><p>支持最多 50,000 字的长文本，或解析一个公开网页链接。</p></div>
           </div>
 
-          <label>标题 <small class="optional">可选</small><input v-model="form.title" :disabled="isPublicDemo" maxlength="300" placeholder="留空时使用“快速记录”" /></label>
+          <div class="source-mode-tabs" role="tablist" aria-label="材料类型">
+            <button type="button" :class="{ active: sourceMode === 'text' }" :disabled="isPublicDemo || busy" @click="sourceMode = 'text'">粘贴长文本</button>
+            <button type="button" :class="{ active: sourceMode === 'url' }" :disabled="isPublicDemo || busy" @click="sourceMode = 'url'">公开链接</button>
+          </div>
+          <label>标题 <small class="optional">可选</small><input v-model="form.title" :disabled="isPublicDemo" maxlength="300" placeholder="留空时自动生成" /></label>
           <label>这次想学会什么？ <small class="optional">可选</small><input v-model="form.learning_goal" :disabled="isPublicDemo" maxlength="500" placeholder="留空时自动整理并记住内容" /></label>
-          <label class="content-field">
-            <span>材料正文 <small :class="{ danger: charCount > 10000 }">{{ charCount.toLocaleString() }} / 10,000</small></span>
-            <textarea v-model="form.content" :disabled="isPublicDemo" maxlength="10000" placeholder="粘贴文章、课程笔记或自己的思考……"></textarea>
+          <label v-if="sourceMode === 'text'" class="content-field">
+            <span>材料正文 <small :class="{ danger: charCount > sourceMaxChars }">{{ charCount.toLocaleString() }} / {{ sourceMaxChars.toLocaleString() }}</small></span>
+            <textarea v-model="form.content" :disabled="isPublicDemo" :maxlength="sourceMaxChars" placeholder="粘贴长文章、课程笔记或自己的思考……"></textarea>
+          </label>
+          <label v-else class="content-field url-field">
+            <span>公开网页地址 <small>仅读取你提交的这个链接</small></span>
+            <input v-model="form.url" :disabled="isPublicDemo" maxlength="2048" inputmode="url" placeholder="https://example.com/article" />
+            <small class="field-help">不支持登录页、内网地址、文件下载和依赖登录态的内容；不会自动搜索其他网页。</small>
           </label>
           <label class="switch-row">
             <input v-model="form.web_access_allowed" :disabled="isPublicDemo" type="checkbox" />
@@ -690,11 +722,11 @@ onMounted(() => {
             <span><strong>允许外部检索</strong><small>默认关闭；MVP 尚未接入真实搜索工具</small></span>
           </label>
           <p v-if="error" class="error">{{ error }}</p>
-          <button class="primary" :disabled="isPublicDemo || busy || charCount > 10000">
-            <span>{{ isPublicDemo ? '公开演示不提交数据' : (busy && savedSource ? '原文已保存 · AI 后台整理中' : (busy ? '正在保存' : (charCount <= 600 ? '快速记录并整理' : '开始生成知识草稿'))) }}</span><b>→</b>
+          <button class="primary" :disabled="isPublicDemo || busy || !sourceReady">
+            <span>{{ isPublicDemo ? '公开演示不提交数据' : (busy && savedSource ? '材料已保存 · AI 后台整理中' : (busy ? (sourceMode === 'url' ? '正在解析链接' : '正在保存') : (sourceMode === 'url' ? '解析链接并整理' : (charCount <= 600 ? '快速记录并整理' : '开始生成知识草稿')))) }}</span><b>→</b>
           </button>
           <div v-if="savedSource" class="capture-receipt">
-            <b>✓ 原文已记录</b>
+            <b>✓ {{ savedSource.origin_type === 'url' ? '网页正文已记录' : '原文已记录' }}</b>
             <span>{{ savedSource.char_count }} 字 · {{ savedSource.save_ms }} ms</span>
             <p>AI 整理在后台继续；记录不会因为模型等待或重试而丢失。</p>
           </div>

@@ -2,6 +2,7 @@ const config = require('../config')
 
 function normalizeError(payload, statusCode) {
   if (payload && typeof payload.detail === 'string') return payload.detail
+  if (payload && payload.detail && payload.detail.message) return payload.detail.message
   if (payload && payload.detail) return JSON.stringify(payload.detail)
   return `请求失败（${statusCode || '网络异常'}）`
 }

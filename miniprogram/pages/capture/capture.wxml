@@ -2,12 +2,17 @@
   <view class="large-title">
     <text class="large-title__eyebrow">QUICK CAPTURE</text>
     <text class="large-title__heading">今天想记住什么？</text>
-    <text class="large-title__copy">写下来就可以离开。原文会先保存，Agent 在后台把它整理成可练习的知识。</text>
+    <text class="large-title__copy">粘贴长文本或公开链接。材料会先保存，Agent 再把它整理成可练习的知识。</text>
   </view>
 
   <view wx:if="{{error}}" class="error-banner">{{error}}</view>
 
   <view wx:if="{{!draft}}" class="ios-card capture-form">
+    <view class="source-mode-tabs">
+      <button class="source-mode-tab {{sourceMode === 'text' ? 'source-mode-tab--active' : ''}}" data-mode="text" bindtap="setSourceMode">粘贴长文本</button>
+      <button class="source-mode-tab {{sourceMode === 'url' ? 'source-mode-tab--active' : ''}}" data-mode="url" bindtap="setSourceMode">公开链接</button>
+    </view>
+    <view class="hairline"></view>
     <view class="field-row compact-field">
       <text class="field-label">标题</text>
       <input class="ios-input" value="{{title}}" maxlength="300" placeholder="快速记录" bindinput="onTitleInput" />
@@ -18,9 +23,13 @@
       <input class="ios-input" value="{{learningGoal}}" maxlength="500" placeholder="可选，AI 会自动整理" bindinput="onGoalInput" />
     </view>
     <view class="hairline"></view>
-    <view class="field-row content-field">
-      <textarea class="ios-textarea" value="{{content}}" maxlength="10000" placeholder="菜谱、知识点、文章摘录，或者刚想到的一件事……" bindinput="onContentInput"></textarea>
-      <text class="character-count">{{charCount}} / 10,000</text>
+    <view wx:if="{{sourceMode === 'text'}}" class="field-row content-field">
+      <textarea class="ios-textarea" value="{{content}}" maxlength="50000" placeholder="长文章、课程笔记、知识点，或者自己的思考……" bindinput="onContentInput"></textarea>
+      <text class="character-count">{{charCount}} / 50,000</text>
+    </view>
+    <view wx:else class="field-row url-source-field">
+      <input class="ios-input url-source-input" value="{{url}}" maxlength="2048" placeholder="https://example.com/article" bindinput="onUrlInput" />
+      <text class="url-source-help">仅读取这个公开链接；不支持登录页、内网地址和文件下载。</text>
     </view>
     <view class="hairline"></view>
     <view class="switch-setting">
@@ -28,7 +37,7 @@
       <switch checked="{{webAccessAllowed}}" color="#34C759" bindchange="onWebAccessChange" />
     </view>
     <view class="form-action">
-      <button class="ios-button" disabled="{{busy || !content}}" bindtap="submitContent">{{busy ? '正在整理…' : '保存并开始整理'}}</button>
+      <button class="ios-button" disabled="{{busy || (sourceMode === 'text' ? !content : !url)}}" bindtap="submitContent">{{busy ? (sourceMode === 'url' ? '正在解析…' : '正在整理…') : (sourceMode === 'url' ? '解析链接并整理' : '保存并开始整理')}}</button>
     </view>
   </view>
 

@@ -387,7 +387,8 @@ class AgentRuntime:
                         start_char=evidence.get("start_char"),
                         end_char=evidence.get("end_char"),
                         quote=evidence.get("quote"),
-                        url=evidence.get("url"),
+                        url=evidence.get("url") or source.origin_url,
+                        retrieved_at=source.retrieved_at,
                     )
                 )
         session.flush()

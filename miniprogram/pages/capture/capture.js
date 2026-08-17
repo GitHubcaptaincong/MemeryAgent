@@ -18,9 +18,11 @@ const progressByState = {
 
 Page({
   data: {
+    sourceMode: 'text',
     title: '',
     learningGoal: '',
     content: '',
+    url: '',
     charCount: 0,
     webAccessAllowed: false,
     busy: false,
@@ -77,14 +79,28 @@ Page({
     this.setData({ content, charCount: content.length })
   },
 
+  onUrlInput(event) {
+    this.setData({ url: event.detail.value })
+  },
+
+  setSourceMode(event) {
+    if (this.data.busy) return
+    this.setData({ sourceMode: event.currentTarget.dataset.mode, error: '' })
+  },
+
   onWebAccessChange(event) {
     this.setData({ webAccessAllowed: event.detail.value })
   },
 
   async submitContent() {
     const content = this.data.content.trim()
-    if (!content) {
+    const url = this.data.url.trim()
+    if (this.data.sourceMode === 'text' && !content) {
       this.setData({ error: '先写下你想记住或理解的内容。' })
+      return
+    }
+    if (this.data.sourceMode === 'url' && !url) {
+      this.setData({ error: '先填写一个公开的 HTTP 或 HTTPS 链接。' })
       return
     }
 
@@ -106,13 +122,20 @@ Page({
 
     try {
       const saveStarted = Date.now()
-      const source = await api.post('/sources', {
-        title: this.data.title.trim() || '快速记录',
-        learning_goal: this.data.learningGoal.trim() || '准确整理并记住这段内容',
-        content,
-        content_type: 'text',
-        web_access_allowed: this.data.webAccessAllowed,
-      })
+      const source = this.data.sourceMode === 'url'
+        ? await api.post('/sources/from-url', {
+            url,
+            title: this.data.title.trim() || null,
+            learning_goal: this.data.learningGoal.trim() || '准确整理并记住这个公开链接的内容',
+            web_access_allowed: this.data.webAccessAllowed,
+          }, { timeout: 20000 })
+        : await api.post('/sources', {
+            title: this.data.title.trim() || '快速记录',
+            learning_goal: this.data.learningGoal.trim() || '准确整理并记住这段内容',
+            content,
+            content_type: 'text',
+            web_access_allowed: this.data.webAccessAllowed,
+          })
       this.setData({
         sourceSaved: { ...source, saveMs: Math.max(1, Date.now() - saveStarted) },
         currentActivity: '原文已保存，AI 正在后台整理',
@@ -255,6 +278,8 @@ Page({
       title: '',
       learningGoal: '',
       content: '',
+      url: '',
+      sourceMode: 'text',
       charCount: 0,
       busy: false,
       sourceSaved: null,

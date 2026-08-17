@@ -46,7 +46,16 @@ def _chunk_source(content: str, *, size: int = 2_000, overlap: int = 200):
         index += 1
 
 
-def create_source(session: Session, *, user_id: UUID, data: SourceCreate) -> Source:
+def create_source(
+    session: Session,
+    *,
+    user_id: UUID,
+    data: SourceCreate,
+    origin_type: str = "text",
+    origin_url: str | None = None,
+    retrieved_at: datetime | None = None,
+    origin_content_hash: str | None = None,
+) -> Source:
     normalized = data.content.replace("\r\n", "\n").strip()
     source = Source(
         user_id=user_id,
@@ -54,6 +63,10 @@ def create_source(session: Session, *, user_id: UUID, data: SourceCreate) -> Sou
         learning_goal=data.learning_goal.strip(),
         raw_content=normalized,
         content_type=data.content_type,
+        origin_type=origin_type,
+        origin_url=origin_url,
+        retrieved_at=retrieved_at,
+        origin_content_hash=origin_content_hash,
         content_hash=_sha256(normalized),
         char_count=len(normalized),
         web_access_allowed=data.web_access_allowed,

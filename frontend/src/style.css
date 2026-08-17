@@ -41,6 +41,12 @@ input:focus, textarea:focus { border-color: #6c780f; }
 textarea { height: 250px; resize: vertical; border: 1px solid #aeb1aa; padding: 16px; line-height: 1.75; }
 .content-field > span { display: flex; justify-content: space-between; }
 .content-field small { color: #858b85; font: 11px ui-monospace, Consolas, monospace; }
+.source-mode-tabs { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; margin: -10px 0 24px; padding: 4px; border: 1px solid #c6c9c2; background: rgba(255,255,255,.45); }
+.source-mode-tabs button { border: 0; padding: 10px 12px; background: transparent; color: #626a64; cursor: pointer; font-family: inherit; font-size: 13px; font-weight: 600; }
+.source-mode-tabs button.active { background: #19211d; color: #f3f4ef; }
+.source-mode-tabs button:disabled { cursor: not-allowed; opacity: .55; }
+.url-field input { margin-top: 8px; }
+.url-field .field-help { display: block; margin-top: 9px; font: 400 12px/1.6 inherit; }
 .danger, .error { color: #a64131 !important; }
 .switch-row { display: flex; align-items: center; gap: 12px; font-weight: 400; }
 .switch-row input { position: absolute; opacity: 0; }

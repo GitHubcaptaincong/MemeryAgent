@@ -152,7 +152,7 @@ def _result_summary(name: str, result: dict[str, Any]) -> dict[str, Any]:
 
 def source_read(context: ToolContext, arguments: dict[str, Any]) -> dict[str, Any]:
     start = max(0, int(arguments.get("start_char", 0)))
-    end = min(len(context.source.raw_content), int(arguments.get("end_char", 10_000)))
+    end = min(len(context.source.raw_content), int(arguments.get("end_char", 50_000)))
     if end <= start:
         raise ValueError("end_char must be greater than start_char")
     return {
@@ -233,7 +233,7 @@ def build_tool_registry() -> ToolRegistry:
                 "type": "object",
                 "properties": {
                     "start_char": {"type": "integer", "minimum": 0},
-                    "end_char": {"type": "integer", "minimum": 1, "maximum": 10_000},
+                    "end_char": {"type": "integer", "minimum": 1, "maximum": 50_000},
                 },
                 "required": ["start_char", "end_char"],
                 "additionalProperties": False,

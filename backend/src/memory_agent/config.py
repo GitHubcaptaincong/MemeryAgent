@@ -44,6 +44,10 @@ class Settings(BaseSettings):
     answer_evaluation_max_output_tokens: int = Field(default=1_000, ge=300, le=4_000)
     answer_evaluation_reasoning_effort: Literal["none", "low", "medium"] = "none"
     web_access_default: bool = False
+    source_max_chars: int = Field(default=50_000, ge=10_000, le=50_000)
+    source_fetch_max_bytes: int = Field(default=2_000_000, ge=100_000, le=10_000_000)
+    source_fetch_timeout_seconds: float = Field(default=12.0, ge=3, le=60)
+    source_fetch_max_redirects: int = Field(default=5, ge=0, le=10)
     agent_max_tool_calls: int = Field(default=12, ge=1, le=100)
     agent_max_web_searches: int = Field(default=2, ge=0, le=20)
     agent_max_revisions: int = Field(default=2, ge=0, le=20)

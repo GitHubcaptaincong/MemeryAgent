@@ -4,6 +4,7 @@ import asyncio
 import json
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
+from urllib.parse import urlsplit
 from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query, status
@@ -59,6 +60,7 @@ from memory_agent.schemas import (
     RunRead,
     SourceCreate,
     SourceRead,
+    SourceUrlCreate,
 )
 from memory_agent.services import (
     confirm_draft,
@@ -67,6 +69,7 @@ from memory_agent.services import (
     decide_memory_candidate,
     get_draft_for_user,
 )
+from memory_agent.source_ingestion import SourceFetchError, fetch_public_source
 from memory_agent.reminders import (
     claim_due_reminders,
     record_delivery_result,
@@ -382,6 +385,48 @@ def post_source(
 ) -> SourceRead:
     user, _profile = _identity(identity)
     source = create_source(session, user_id=user.id, data=data)
+    return SourceRead.model_validate(source)
+
+
+@router.post("/sources/from-url", response_model=SourceRead, status_code=status.HTTP_201_CREATED)
+def post_source_from_url(
+    data: SourceUrlCreate,
+    session: Session = Depends(get_session),
+    identity: IdentityContext = Depends(get_current_identity),
+) -> SourceRead:
+    user, _profile = _identity(identity)
+    settings = identity.settings
+    try:
+        fetched = fetch_public_source(
+            data.url,
+            max_chars=settings.source_max_chars,
+            max_bytes=settings.source_fetch_max_bytes,
+            timeout_seconds=settings.source_fetch_timeout_seconds,
+            max_redirects=settings.source_fetch_max_redirects,
+        )
+    except SourceFetchError as exc:
+        status_code = status.HTTP_502_BAD_GATEWAY if exc.retryable else status.HTTP_422_UNPROCESSABLE_ENTITY
+        raise HTTPException(
+            status_code=status_code,
+            detail={"code": exc.code, "message": str(exc)},
+        ) from exc
+
+    title = (data.title or fetched.title or urlsplit(fetched.final_url).hostname or "公开链接").strip()
+    source = create_source(
+        session,
+        user_id=user.id,
+        data=SourceCreate(
+            title=title[:300],
+            learning_goal=data.learning_goal,
+            content=fetched.content,
+            content_type="text",
+            web_access_allowed=data.web_access_allowed,
+        ),
+        origin_type="url",
+        origin_url=fetched.final_url,
+        retrieved_at=fetched.retrieved_at,
+        origin_content_hash=fetched.response_hash,
+    )
     return SourceRead.model_validate(source)
 
 
