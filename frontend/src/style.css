@@ -523,6 +523,8 @@ blockquote { border-left: 2px solid #aabd1f; margin: 18px 0 0; padding: 5px 0 5p
 .mini-shell .processing-details ol { max-height: 120px; margin: 7px 0 0; overflow-y: auto; padding: 0; list-style: none; }
 .mini-shell .processing-details li { display: flex; justify-content: space-between; gap: 8px; padding: 4px 0; color: #636366; font-size: 10px; }
 .mini-shell .processing-details li small { color: #aeaeb2; }
+.mini-shell .stop-run { width: 100%; margin-top: 9px; border: 0; border-radius: 9px; background: #e5e5ea; padding: 8px 10px; color: #c9342f; font-size: 12px; cursor: pointer; }
+.mini-shell .stop-run:disabled { opacity: .55; cursor: default; }
 .mini-shell .chat-memory-approval { margin: 18px 0; border: 1px solid #dedee3; border-radius: 14px; background: #fff; padding: 13px; }
 .mini-shell .chat-memory-approval > small, .mini-shell .chat-memory-approval > strong { display: block; }
 .mini-shell .chat-memory-approval > small { color: #8e8e93; font-size: 10px; }

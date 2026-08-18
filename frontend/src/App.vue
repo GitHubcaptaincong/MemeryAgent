@@ -63,9 +63,13 @@ const reminder = ref({
 const subscriptionStatus = ref(null)
 const reminderBusy = ref(false)
 const reminderSaved = ref(false)
+const canceling = ref(false)
 let eventSource = null
 let clock = null
 let evaluationTimer = null
+let submitController = null
+let stoppingAfterServerError = false
+let pendingTurn = null
 
 const stateLabels = {
   queued: '排队中',
@@ -240,8 +244,8 @@ async function openConversation(conversationId) {
   }
 }
 
-function newConversation() {
-  if (busy.value) return
+function resetConversationState() {
+  pendingTurn = null
   activeConversation.value = null
   conversationTurns.value = []
   run.value = null
@@ -255,6 +259,56 @@ function newConversation() {
   if (window.innerWidth <= 900) historyOpen.value = false
 }
 
+async function stopActiveRun({ notify = true } = {}) {
+  if (canceling.value) return false
+  canceling.value = true
+  const controller = submitController
+  submitController = null
+  controller?.abort()
+  closeStream()
+  stopClock()
+  try {
+    if (run.value?.id && !runFinished.value) {
+      const cancelled = await api(`/api/v1/runs/${run.value.id}/cancel`, {
+        method: 'POST',
+        body: '{}',
+      })
+      run.value = { ...cancelled, state: 'cancelled' }
+    }
+    busy.value = false
+    tasksExpanded.value = false
+    if (notify) error.value = '本次请求已停止，不会自动重试。'
+    return true
+  } catch (reason) {
+    busy.value = false
+    tasksExpanded.value = false
+    error.value = `客户端已停止等待，但服务器取消失败：${friendlyError(reason)}`
+    return false
+  } finally {
+    canceling.value = false
+  }
+}
+
+async function terminateAfterServerError(message = '') {
+  if (stoppingAfterServerError) return
+  stoppingAfterServerError = true
+  await stopActiveRun({ notify: false })
+  error.value = message
+    ? `服务器处理失败，本次请求已终止：${message}`
+    : '服务器连接失败，本次请求已终止，不会自动重试。'
+  stoppingAfterServerError = false
+}
+
+async function newConversation() {
+  if (canceling.value) return
+  if (busy.value) {
+    const confirmed = window.confirm('当前任务仍在运行。停止任务并新建对话吗？')
+    if (!confirmed) return
+    if (!await stopActiveRun({ notify: false })) return
+  }
+  resetConversationState()
+}
+
 async function refreshActiveConversation() {
   if (!activeConversation.value?.id) return
   const detail = await api(`/api/v1/conversations/${activeConversation.value.id}`)
@@ -264,6 +318,7 @@ async function refreshActiveConversation() {
 }
 
 async function startRun() {
+  if (busy.value) return
   error.value = ''
   if (isPublicDemo) {
     error.value = demoReadOnlyMessage
@@ -286,15 +341,30 @@ async function startRun() {
   livePulse.value = { message: '请求已收到，正在保存材料并创建任务' }
   closeStream()
   startClock()
+  const requestController = new AbortController()
+  submitController = requestController
   try {
     let conversation = activeConversation.value
     if (!conversation) {
-      conversation = await api('/api/v1/conversations', { method: 'POST', body: '{}' })
+      conversation = await api('/api/v1/conversations', {
+        method: 'POST',
+        body: '{}',
+        signal: requestController.signal,
+      })
       activeConversation.value = conversation
-      conversations.value = [conversation, ...conversations.value]
     }
     const submittedInput = form.value.content.trim()
-    const turnKey = `web-turn-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+    if (
+      !pendingTurn
+      || pendingTurn.conversationId !== conversation.id
+      || pendingTurn.input !== submittedInput
+    ) {
+      pendingTurn = {
+        conversationId: conversation.id,
+        input: submittedInput,
+        key: `web-turn-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+      }
+    }
     const started = await api(`/api/v1/conversations/${conversation.id}/turns`, {
       method: 'POST',
       body: JSON.stringify({
@@ -302,9 +372,12 @@ async function startRun() {
         title: null,
         content_type: form.value.content_type,
         web_access_allowed: false,
-        idempotency_key: turnKey,
+        idempotency_key: pendingTurn.key,
       }),
+      signal: requestController.signal,
     })
+    pendingTurn = null
+    if (submitController === requestController) submitController = null
     activeConversation.value = started.conversation
     conversationTurns.value = [...conversationTurns.value, started.turn]
     form.value.content = ''
@@ -315,14 +388,16 @@ async function startRun() {
     lastSignalAt.value = Date.now()
     openStream(run.value.id)
   } catch (reason) {
-    error.value = friendlyError(reason)
+    if (submitController === requestController) submitController = null
+    if (reason?.name !== 'AbortError') error.value = friendlyError(reason)
     busy.value = false
     stopClock()
   }
 }
 
 function openStream(runId) {
-  eventSource = new EventSource(`${apiBase}/api/v1/runs/${runId}/events/stream`)
+  const source = new EventSource(`${apiBase}/api/v1/runs/${runId}/events/stream`)
+  eventSource = source
   const eventTypes = [
     'run.created', 'run.state_changed', 'source.loaded', 'memory.retrieved',
     'skills.selected', 'agent.plan_created', 'agent.decision', 'tool.started',
@@ -332,10 +407,11 @@ function openStream(runId) {
     'review.cards_created',
   ]
   eventTypes.forEach((eventType) => {
-    eventSource.addEventListener(eventType, (message) => consumeEvent(message))
+    source.addEventListener(eventType, (message) => consumeEvent(message))
   })
-  eventSource.addEventListener('progress.pulse', (message) => consumePulse(message))
-  eventSource.addEventListener('stream.closed', async () => {
+  source.addEventListener('progress.pulse', (message) => consumePulse(message))
+  source.addEventListener('stream.closed', async () => {
+    if (eventSource !== source) return
     await refreshRun()
     if (run.value?.state === 'awaiting_user') await loadDraft()
     await refreshActiveConversation().catch(() => {})
@@ -344,16 +420,9 @@ function openStream(runId) {
     stopClock()
     closeStream()
   })
-  eventSource.onerror = async () => {
-    await refreshRun().catch(() => {})
-    if (run.value?.state === 'awaiting_user') await loadDraft().catch(() => {})
-    await refreshActiveConversation().catch(() => {})
-    if (['awaiting_user', 'completed', 'failed', 'cancelled', 'budget_exhausted'].includes(run.value?.state)) {
-      tasksExpanded.value = false
-      busy.value = false
-      stopClock()
-      closeStream()
-    }
+  source.onerror = () => {
+    if (eventSource !== source) return
+    void terminateAfterServerError()
   }
 }
 
@@ -362,6 +431,10 @@ function consumeEvent(message) {
   if (!events.value.some((existing) => existing.seq === item.seq)) events.value.push(item)
   livePulse.value = { message: eventTitle(item) }
   lastSignalAt.value = Date.now()
+  if (item.event_type === 'run.retryable_error') {
+    void terminateAfterServerError(item.payload?.message || '')
+    return
+  }
   if (item.event_type === 'run.state_changed') {
     run.value = { ...run.value, state: item.payload.state }
     if (['awaiting_user', 'completed', 'failed', 'cancelled', 'budget_exhausted'].includes(item.payload.state)) {
@@ -842,7 +915,7 @@ onMounted(() => {
         <button v-if="historyOpen" class="history-backdrop" aria-label="关闭历史记录" @click="historyOpen = false"></button>
         <aside class="chat-history" :class="{ open: historyOpen }">
           <header><strong>历史对话</strong><button type="button" aria-label="关闭历史记录" @click="historyOpen = false">×</button></header>
-          <button type="button" class="new-chat" :disabled="busy" @click="newConversation"><span>✎</span> 新对话</button>
+          <button type="button" class="new-chat" :disabled="canceling" @click="newConversation"><span>✎</span> 新对话</button>
           <div class="history-list">
             <template v-for="group in groupedConversations" :key="group.label">
               <p class="history-group-label">{{ group.label }}</p>
@@ -864,7 +937,7 @@ onMounted(() => {
           <header class="chat-header">
             <button type="button" class="history-trigger" aria-label="打开历史对话" @click="historyOpen = true">☰</button>
             <strong>{{ activeConversation?.title || '整理' }}</strong>
-            <button type="button" class="compose-trigger" aria-label="新建对话" :disabled="busy" @click="newConversation">✎</button>
+            <button type="button" class="compose-trigger" aria-label="新建对话" :disabled="canceling" @click="newConversation">✎</button>
           </header>
 
           <div class="chat-thread">
@@ -906,7 +979,7 @@ onMounted(() => {
 
             <article v-if="busy" class="assistant-turn processing-turn"><span class="assistant-avatar">M</span><div>
               <button type="button" class="inline-processing" @click="tasksExpanded = !tasksExpanded"><i></i><span>{{ currentActivity || '正在整理…' }}</span><b>{{ tasksExpanded ? '⌃' : '⌄' }}</b></button>
-              <div v-show="tasksExpanded" class="processing-details"><div class="progress"><i :style="{ width: `${progress}%` }"></i></div><ol v-if="events.length"><li v-for="item in events" :key="item.seq"><span>{{ eventTitle(item) }}</span><small>{{ formatTime(item.created_at) }}</small></li></ol></div>
+              <div v-show="tasksExpanded" class="processing-details"><div class="progress"><i :style="{ width: `${progress}%` }"></i></div><ol v-if="events.length"><li v-for="item in events" :key="item.seq"><span>{{ eventTitle(item) }}</span><small>{{ formatTime(item.created_at) }}</small></li></ol><button type="button" class="stop-run" :disabled="canceling" @click="stopActiveRun">{{ canceling ? '正在停止…' : '停止本次任务' }}</button></div>
             </div></article>
 
             <article v-for="candidate in memoryCandidates" :key="candidate.id" class="chat-memory-approval">

@@ -5,7 +5,7 @@
       <text>历史对话</text>
       <button class="app-icon-button drawer-close" aria-label="关闭历史对话" bindtap="closeHistory">×</button>
     </view>
-    <button class="drawer-new-chat" disabled="{{busy}}" bindtap="newConversation">
+    <button class="drawer-new-chat" disabled="{{canceling}}" bindtap="newConversation">
       <view class="compose-icon compose-icon--small"><view class="compose-box"></view><view class="compose-stroke"></view></view>
       <text>新对话</text>
     </button>
@@ -37,7 +37,7 @@
       <view class="menu-icon"><text></text><text></text><text></text></view>
     </button>
     <text class="app-bar-title">{{activeConversation ? activeConversation.title : '整理'}}</text>
-    <button class="app-icon-button" aria-label="新建对话" disabled="{{busy}}" bindtap="newConversation">
+    <button class="app-icon-button" aria-label="新建对话" disabled="{{canceling}}" bindtap="newConversation">
       <view class="compose-icon"><view class="compose-box"></view><view class="compose-stroke"></view></view>
     </button>
   </view>
@@ -136,6 +136,7 @@
             <scroll-view wx:if="{{events.length}}" scroll-y enhanced class="processing-events">
               <view wx:for="{{events}}" wx:key="id" class="processing-event"><text>{{item.label}}</text><text>{{item.clock}}</text></view>
             </scroll-view>
+            <button class="stop-run-button" disabled="{{canceling}}" bindtap="stopActiveRun">{{canceling ? '正在停止…' : '停止本次任务'}}</button>
           </view>
         </view>
       </view>

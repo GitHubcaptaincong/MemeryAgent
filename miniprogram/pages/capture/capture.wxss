@@ -555,6 +555,25 @@
   color: #aeaeb2;
 }
 
+.stop-run-button {
+  width: 100%;
+  margin-top: 18rpx;
+  border: 0;
+  border-radius: 18rpx;
+  background: #e5e5ea;
+  color: #c9342f;
+  font-size: 24rpx;
+  line-height: 64rpx;
+}
+
+.stop-run-button::after {
+  border: 0;
+}
+
+.stop-run-button[disabled] {
+  opacity: .55;
+}
+
 .memory-approval-card {
   margin: 24rpx 0;
   padding: 24rpx;

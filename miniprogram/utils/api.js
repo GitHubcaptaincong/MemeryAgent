@@ -9,7 +9,7 @@ function normalizeError(payload, statusCode) {
 
 function localRequest(path, options) {
   return new Promise((resolve, reject) => {
-    wx.request({
+    const task = wx.request({
       url: `${config.apiBaseUrl}${path}`,
       method: options.method || 'GET',
       data: options.data,
@@ -29,6 +29,7 @@ function localRequest(path, options) {
         reject(new Error(error.errMsg || '无法连接后端服务'))
       },
     })
+    if (typeof options.onTask === 'function') options.onTask(task)
   })
 }
 
@@ -38,7 +39,7 @@ function cloudRequest(path, options) {
       reject(new Error('当前基础库不支持云托管调用'))
       return
     }
-    wx.cloud.callContainer({
+    const task = wx.cloud.callContainer({
       config: { env: config.cloudEnv },
       service: config.cloudService,
       path: `${config.apiPrefix}${path}`,
@@ -61,6 +62,7 @@ function cloudRequest(path, options) {
         reject(new Error(error.errMsg || '云托管请求失败'))
       },
     })
+    if (typeof options.onTask === 'function') options.onTask(task)
   })
 }
 

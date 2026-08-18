@@ -2,7 +2,8 @@ const api = require('../../utils/api')
 const { idempotencyKey } = require('../../utils/ids')
 const { stateLabel, eventLabel, formatClock } = require('../../utils/format')
 
-const terminalStates = ['awaiting_user', 'completed', 'failed', 'cancelled', 'budget_exhausted']
+const finishedStates = ['awaiting_user', 'completed', 'failed', 'cancelled', 'budget_exhausted']
+const terminalStates = finishedStates.concat('retry_wait')
 const progressByState = {
   queued: 8,
   ingesting: 18,
@@ -94,6 +95,7 @@ Page({
     showCharCount: false,
     scrollIntoView: '',
     busy: false,
+    canceling: false,
     sourceSaved: null,
     run: null,
     runStateLabel: '',
@@ -109,6 +111,10 @@ Page({
   },
 
   onLoad() {
+    this.submitting = false
+    this.submitCancelled = false
+    this.submitRequestTask = null
+    this.pendingTurn = null
     const windowInfo = typeof wx.getWindowInfo === 'function' ? wx.getWindowInfo() : wx.getSystemInfoSync()
     const statusBarHeight = windowInfo.statusBarHeight || 20
     const menuRect = typeof wx.getMenuButtonBoundingClientRect === 'function'
@@ -137,7 +143,7 @@ Page({
     const tabBar = typeof this.getTabBar === 'function' && this.getTabBar()
     if (tabBar) tabBar.setData({ selected: 0 })
     this.loadConversations()
-    if (this.data.run && !terminalStates.includes(this.data.run.state)) this.schedulePoll(0)
+    if (this.data.busy && this.data.run && !terminalStates.includes(this.data.run.state)) this.schedulePoll(0)
   },
 
   onHide() {
@@ -146,6 +152,9 @@ Page({
 
   onUnload() {
     this.stopPolling()
+    if (this.submitRequestTask && typeof this.submitRequestTask.abort === 'function') {
+      this.submitRequestTask.abort()
+    }
   },
 
   onContentInput(event) {
@@ -296,8 +305,8 @@ Page({
     }
   },
 
-  newConversation() {
-    if (this.data.busy) return
+  resetConversationState() {
+    this.pendingTurn = null
     this.stopPolling()
     wx.removeStorageSync('memoryAgentActiveRunId')
     wx.removeStorageSync('memoryAgentActiveConversationId')
@@ -324,6 +333,74 @@ Page({
     })
   },
 
+  confirmStopForNewConversation() {
+    return new Promise((resolve) => {
+      wx.showModal({
+        title: '停止当前任务？',
+        content: '当前任务仍在运行。停止后将进入新对话。',
+        confirmText: '停止并新建',
+        cancelText: '继续等待',
+        success: (result) => resolve(Boolean(result.confirm)),
+        fail: () => resolve(false),
+      })
+    })
+  },
+
+  async newConversation() {
+    if (this.data.canceling) return
+    if (this.data.busy) {
+      if (!await this.confirmStopForNewConversation()) return
+      if (!await this.stopActiveRun({ notify: false })) return
+    }
+    this.resetConversationState()
+  },
+
+  async stopActiveRun(options = {}) {
+    if (this.data.canceling) return false
+    const notify = options.notify !== false
+    this.setData({ canceling: true })
+    this.stopPolling()
+    this.submitCancelled = true
+    if (this.submitRequestTask && typeof this.submitRequestTask.abort === 'function') {
+      this.submitRequestTask.abort()
+      this.submitRequestTask = null
+    }
+    try {
+      let cancelledRun = this.data.run
+      if (cancelledRun && cancelledRun.id && !finishedStates.includes(cancelledRun.state)) {
+        cancelledRun = await api.post(`/runs/${cancelledRun.id}/cancel`, {})
+      }
+      wx.removeStorageSync('memoryAgentActiveRunId')
+      this.setData({
+        busy: false,
+        canceling: false,
+        tasksExpanded: false,
+        run: cancelledRun ? { ...cancelledRun, state: 'cancelled' } : null,
+        runStateLabel: '已取消',
+        currentActivity: '本次请求已停止',
+        error: notify ? '本次请求已停止，不会自动重试。' : '',
+      })
+      return true
+    } catch (error) {
+      this.setData({
+        busy: false,
+        canceling: false,
+        tasksExpanded: false,
+        error: `客户端已停止等待，但服务器取消失败：${friendlyError(error)}`,
+      })
+      return false
+    }
+  },
+
+  async terminateAfterServerError(message = '') {
+    await this.stopActiveRun({ notify: false })
+    this.setData({
+      error: message
+        ? `服务器处理失败，本次请求已终止：${message}`
+        : '服务器连接失败，本次请求已终止，不会自动重试。',
+    })
+  },
+
   async refreshActiveConversation() {
     const id = this.data.activeConversation && this.data.activeConversation.id
     if (!id) return
@@ -336,12 +413,15 @@ Page({
   },
 
   async submitContent() {
+    if (this.data.busy || this.submitting) return
     const content = this.data.content.trim()
     if (!content) {
       this.setData({ error: '先写下你想记住或理解的内容。' })
       return
     }
 
+    this.submitting = true
+    this.submitCancelled = false
     this.stopPolling()
     this.startedAt = Date.now()
     this.lastEventSeq = 0
@@ -361,15 +441,34 @@ Page({
     try {
       let conversation = this.data.activeConversation
       if (!conversation) {
-        conversation = await api.post('/conversations', {})
+        conversation = await api.post('/conversations', {}, {
+          onTask: (task) => { this.submitRequestTask = task },
+        })
+        this.submitRequestTask = null
+      }
+      if (
+        !this.pendingTurn
+        || this.pendingTurn.conversationId !== conversation.id
+        || this.pendingTurn.input !== content
+      ) {
+        this.pendingTurn = {
+          conversationId: conversation.id,
+          input: content,
+          key: idempotencyKey('mini-turn'),
+        }
       }
       const started = await api.post(`/conversations/${conversation.id}/turns`, {
         input: content,
         title: null,
         content_type: 'text',
         web_access_allowed: false,
-        idempotency_key: idempotencyKey('mini-turn'),
-      }, { timeout: 20000 })
+        idempotency_key: this.pendingTurn.key,
+      }, {
+        timeout: 20000,
+        onTask: (task) => { this.submitRequestTask = task },
+      })
+      this.pendingTurn = null
+      this.submitRequestTask = null
       wx.setStorageSync('memoryAgentActiveRunId', started.run.id)
       wx.setStorageSync('memoryAgentActiveConversationId', started.conversation.id)
       this.setData({
@@ -388,7 +487,13 @@ Page({
       this.scrollToBottom()
       this.schedulePoll(0)
     } catch (error) {
-      this.setData({ busy: false, error: friendlyError(error) })
+      this.setData({
+        busy: false,
+        error: this.submitCancelled ? this.data.error : friendlyError(error),
+      })
+    } finally {
+      this.submitRequestTask = null
+      this.submitting = false
     }
   },
 
@@ -436,6 +541,10 @@ Page({
         this.setData({ busy: false, tasksExpanded: false })
         return
       }
+      if (run.state === 'retry_wait') {
+        await this.terminateAfterServerError(run.error_message || '服务器暂时不可用')
+        return
+      }
       if (run.state === 'failed' || run.state === 'cancelled' || run.state === 'budget_exhausted') {
         wx.removeStorageSync('memoryAgentActiveRunId')
         this.setData({ busy: false, tasksExpanded: false, error: run.error_message || stateLabel(run.state) })
@@ -449,9 +558,13 @@ Page({
       }
       this.schedulePoll(1500)
     } catch (error) {
-      this.setData({ currentActivity: '连接短暂中断，正在重试' })
-      wx.showToast({ title: '连接中断，正在重试', icon: 'none' })
-      this.schedulePoll(2500)
+      await this.stopActiveRun({ notify: false })
+      this.setData({
+        busy: false,
+        tasksExpanded: false,
+        currentActivity: '服务器连接失败，已停止',
+        error: `服务器连接失败，本次请求已终止，不会自动重试：${friendlyError(error)}`,
+      })
     } finally {
       this.polling = false
     }
