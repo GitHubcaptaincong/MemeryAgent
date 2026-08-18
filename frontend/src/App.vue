@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { publicDemo } from './demoData.js'
 
 const apiBase = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
@@ -8,7 +8,6 @@ const demoReadOnlyMessage = '公开演示模式不会连接后端、写入数据
 const sourceMaxChars = 50000
 const form = ref({
   title: '',
-  learning_goal: '',
   content: '',
   content_type: 'markdown',
 })
@@ -20,6 +19,16 @@ const draft = ref(null)
 const memoryCandidates = ref([])
 const savedSource = ref(null)
 const tasksExpanded = ref(true)
+const conversations = ref([])
+const activeConversation = ref(null)
+const conversationTurns = ref([])
+const historyOpen = ref(false)
+const historyError = ref('')
+const composerPlaceholder = ref('发消息、粘贴文章或链接…')
+const composerTextarea = ref(null)
+const attachmentSheetOpen = ref(false)
+const expandedTurnIds = ref(new Set())
+const expandedResultId = ref('')
 const livePulse = ref(null)
 const startedAt = ref(null)
 const elapsedSeconds = ref(0)
@@ -79,6 +88,20 @@ const stateLabels = {
 const charCount = computed(() => form.value.content.length)
 const sourceReady = computed(() => Boolean(form.value.content.trim()) && charCount.value <= sourceMaxChars)
 const inputLooksLikeUrl = computed(() => /^https?:\/\/\S+$/i.test(form.value.content.trim()))
+const showCharacterCount = computed(() => charCount.value >= sourceMaxChars * 0.8)
+const groupedConversations = computed(() => {
+  const now = new Date()
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+  const yesterday = today - 24 * 60 * 60 * 1000
+  const groups = new Map()
+  conversations.value.forEach((conversation) => {
+    const time = new Date(conversation.updated_at).getTime()
+    const label = time >= today ? '今天' : time >= yesterday ? '昨天' : '更早'
+    if (!groups.has(label)) groups.set(label, [])
+    groups.get(label).push(conversation)
+  })
+  return [...groups].map(([label, items]) => ({ label, items }))
+})
 const runFinished = computed(() => ['awaiting_user', 'completed', 'failed', 'cancelled', 'budget_exhausted'].includes(run.value?.state))
 const progress = computed(() => {
   const states = ['queued', 'ingesting', 'retrieving_memory', 'routing_skills', 'planning', 'executing', 'drafting', 'reviewing', 'awaiting_user']
@@ -131,6 +154,115 @@ async function api(path, options = {}) {
   return response.json()
 }
 
+function friendlyError(reason, fallback = '操作失败，请重试') {
+  const message = String(reason?.message || '')
+  if (/not found/i.test(message)) return '当前云端版本尚未包含对话接口，请部署最新后端后重试。'
+  return message || fallback
+}
+
+function parsedTurnUrl(content) {
+  const value = String(content || '').trim()
+  if (!/^https?:\/\/\S+$/i.test(value)) return null
+  try { return new URL(value) } catch { return null }
+}
+
+function turnIsUrl(turn) { return Boolean(parsedTurnUrl(turn.user_content)) }
+function turnHostname(turn) { return parsedTurnUrl(turn.user_content)?.hostname.replace(/^www\./, '') || '' }
+function turnShortUrl(turn) {
+  const url = parsedTurnUrl(turn.user_content)
+  return url ? `${url.origin}${url.pathname === '/' ? '' : url.pathname}`.slice(0, 96) : ''
+}
+function turnIsLongText(turn) { return !turnIsUrl(turn) && String(turn.user_content || '').length > 420 }
+function turnPreview(turn) { return String(turn.user_content || '').slice(0, 140) }
+function turnExpanded(turn) { return expandedTurnIds.value.has(turn.id) }
+
+function toggleTurn(turn) {
+  const next = new Set(expandedTurnIds.value)
+  if (next.has(turn.id)) next.delete(turn.id)
+  else next.add(turn.id)
+  expandedTurnIds.value = next
+}
+
+function chooseQuickAction(placeholder) {
+  composerPlaceholder.value = placeholder
+  nextTick(() => composerTextarea.value?.focus())
+}
+
+function resizeComposer(event) {
+  const textarea = event.currentTarget
+  textarea.style.height = 'auto'
+  textarea.style.height = `${Math.min(textarea.scrollHeight, 180)}px`
+  textarea.style.overflowY = textarea.scrollHeight > 180 ? 'auto' : 'hidden'
+}
+
+function addLinkFromSheet() {
+  attachmentSheetOpen.value = false
+  composerPlaceholder.value = '粘贴一个 https:// 开头的公开链接…'
+  nextTick(() => composerTextarea.value?.focus())
+}
+
+async function pasteFromClipboard() {
+  attachmentSheetOpen.value = false
+  try {
+    const content = await navigator.clipboard.readText()
+    form.value.content = content.slice(0, sourceMaxChars)
+    nextTick(() => composerTextarea.value?.focus())
+  } catch {
+    error.value = '浏览器未允许读取剪贴板，请直接在输入框中粘贴。'
+  }
+}
+
+async function loadConversations() {
+  try {
+    conversations.value = await api('/api/v1/conversations?limit=50')
+    historyError.value = ''
+  } catch (reason) {
+    historyError.value = friendlyError(reason, '历史对话加载失败，请重试。')
+  }
+}
+
+async function openConversation(conversationId) {
+  if (busy.value) return
+  try {
+    const detail = await api(`/api/v1/conversations/${conversationId}`)
+    activeConversation.value = detail.conversation
+    conversationTurns.value = detail.turns
+    const latest = detail.turns[detail.turns.length - 1]
+    run.value = latest?.run_id ? { id: latest.run_id, state: latest.run_state } : null
+    draft.value = latest?.draft || null
+    events.value = []
+    livePulse.value = null
+    error.value = ''
+    if (window.innerWidth <= 900) historyOpen.value = false
+    await loadConversations()
+  } catch (reason) {
+    error.value = friendlyError(reason, '对话加载失败，请重试。')
+  }
+}
+
+function newConversation() {
+  if (busy.value) return
+  activeConversation.value = null
+  conversationTurns.value = []
+  run.value = null
+  draft.value = null
+  events.value = []
+  livePulse.value = null
+  form.value.content = ''
+  composerPlaceholder.value = '发消息、粘贴文章或链接…'
+  expandedResultId.value = ''
+  error.value = ''
+  if (window.innerWidth <= 900) historyOpen.value = false
+}
+
+async function refreshActiveConversation() {
+  if (!activeConversation.value?.id) return
+  const detail = await api(`/api/v1/conversations/${activeConversation.value.id}`)
+  activeConversation.value = detail.conversation
+  conversationTurns.value = detail.turns
+  await loadConversations()
+}
+
 async function startRun() {
   error.value = ''
   if (isPublicDemo) {
@@ -155,35 +287,35 @@ async function startRun() {
   closeStream()
   startClock()
   try {
-    const saveStarted = performance.now()
-    const source = await api('/api/v1/sources/resolve', {
+    let conversation = activeConversation.value
+    if (!conversation) {
+      conversation = await api('/api/v1/conversations', { method: 'POST', body: '{}' })
+      activeConversation.value = conversation
+      conversations.value = [conversation, ...conversations.value]
+    }
+    const submittedInput = form.value.content.trim()
+    const turnKey = `web-turn-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+    const started = await api(`/api/v1/conversations/${conversation.id}/turns`, {
       method: 'POST',
       body: JSON.stringify({
-        input: form.value.content,
-        title: form.value.title.trim() || null,
-        learning_goal: form.value.learning_goal.trim() || '准确整理并记住这份材料',
+        input: submittedInput,
+        title: null,
         content_type: form.value.content_type,
         web_access_allowed: false,
+        idempotency_key: turnKey,
       }),
     })
-    savedSource.value = {
-      ...source,
-      save_ms: Math.max(1, Math.round(performance.now() - saveStarted)),
-    }
-    livePulse.value = { message: source.origin_type === 'url' ? '网页正文已解析并保存，AI 正在后台整理' : '原文已经保存，AI 正在后台整理' }
+    activeConversation.value = started.conversation
+    conversationTurns.value = [...conversationTurns.value, started.turn]
+    form.value.content = ''
+    livePulse.value = { message: '材料已保存，Agent 正在生成可复习的知识草稿' }
     lastSignalAt.value = Date.now()
-    run.value = await api('/api/v1/runs', {
-      method: 'POST',
-      body: JSON.stringify({
-        source_id: source.id,
-        idempotency_key: `web-${source.id}`,
-      }),
-    })
+    run.value = started.run
     livePulse.value = { message: '任务已创建，正在连接实时运行轨迹' }
     lastSignalAt.value = Date.now()
     openStream(run.value.id)
   } catch (reason) {
-    error.value = reason.message
+    error.value = friendlyError(reason)
     busy.value = false
     stopClock()
   }
@@ -206,6 +338,7 @@ function openStream(runId) {
   eventSource.addEventListener('stream.closed', async () => {
     await refreshRun()
     if (run.value?.state === 'awaiting_user') await loadDraft()
+    await refreshActiveConversation().catch(() => {})
     if (runFinished.value) tasksExpanded.value = false
     busy.value = false
     stopClock()
@@ -214,6 +347,7 @@ function openStream(runId) {
   eventSource.onerror = async () => {
     await refreshRun().catch(() => {})
     if (run.value?.state === 'awaiting_user') await loadDraft().catch(() => {})
+    await refreshActiveConversation().catch(() => {})
     if (['awaiting_user', 'completed', 'failed', 'cancelled', 'budget_exhausted'].includes(run.value?.state)) {
       tasksExpanded.value = false
       busy.value = false
@@ -341,6 +475,7 @@ async function confirmDraft() {
   try {
     draft.value = await api(`/api/v1/drafts/${draft.value.id}/confirm`, { method: 'POST' })
     await Promise.all([refreshRun(), refreshVisibleEvents()])
+    await refreshActiveConversation()
     memoryCandidates.value = await api('/api/v1/memory-candidates?status=pending')
     await loadReviewData()
   } catch (reason) {
@@ -625,13 +760,33 @@ function loadPublicDemo() {
   form.value = {
     ...form.value,
     title: publicDemo.source.title,
-    learning_goal: publicDemo.source.learning_goal,
     content: publicDemo.source.content,
   }
   savedSource.value = publicDemo.source
   run.value = publicDemo.run
   events.value = [...publicDemo.events]
   draft.value = publicDemo.draft
+  const demoConversation = {
+    id: 'demo-conversation',
+    title: publicDemo.source.title,
+    title_status: 'generated',
+    turn_count: 1,
+    created_at: publicDemo.run.created_at,
+    updated_at: publicDemo.run.finished_at || publicDemo.run.created_at,
+  }
+  activeConversation.value = demoConversation
+  conversations.value = [demoConversation]
+  conversationTurns.value = [{
+    id: 'demo-turn',
+    position: 1,
+    user_content: publicDemo.source.content,
+    source_id: publicDemo.source.id,
+    run_id: publicDemo.run.id,
+    run_state: publicDemo.run.state,
+    assistant_summary: publicDemo.draft.agent_summary.overview,
+    draft: publicDemo.draft,
+    created_at: publicDemo.run.created_at,
+  }]
   reviewQueue.value = [...publicDemo.reviewQueue]
   reviewOverview.value = { due_count: publicDemo.reviewQueue.length, total_active: publicDemo.reviewQueue.length, next_due_at: null }
   reviewHistory.value = [...publicDemo.reviewHistory]
@@ -654,6 +809,7 @@ onMounted(() => {
   }
   loadReviewData().catch(() => {})
   loadReminderSettings().catch(() => {})
+  loadConversations().catch(() => {})
 })
 </script>
 
@@ -682,100 +838,95 @@ onMounted(() => {
         <small>DEMO · NO PERSISTENCE</small>
       </aside>
 
-      <section v-if="activeView === 'organize'" class="hero">
-        <p class="eyebrow">QUICK CAPTURE</p>
-        <h1>今天想记住什么？</h1>
-        <p class="hero-copy">写下来就可以离开。原文会先保存，Agent 在后台把它整理成可练习的知识。</p>
-      </section>
-
-      <section v-if="activeView === 'organize'" class="workspace">
-        <form class="source-panel" @submit.prevent="startRun">
-          <div class="section-heading">
-            <span>01</span>
-            <div><h2>投递学习材料</h2><p>在同一个输入框粘贴长文本或公开链接，Agent 会自动识别。</p></div>
-          </div>
-
-          <label>标题 <small class="optional">可选</small><input v-model="form.title" :disabled="isPublicDemo" maxlength="300" placeholder="留空时自动生成" /></label>
-          <label>这次想学会什么？ <small class="optional">可选</small><input v-model="form.learning_goal" :disabled="isPublicDemo" maxlength="500" placeholder="留空时自动整理并记住内容" /></label>
-          <label class="content-field">
-            <span>材料内容 <small :class="{ danger: charCount > sourceMaxChars }">{{ charCount.toLocaleString() }} / {{ sourceMaxChars.toLocaleString() }}</small></span>
-            <textarea v-model="form.content" :disabled="isPublicDemo" :maxlength="sourceMaxChars" placeholder="粘贴长文本，或直接粘贴一个 https:// 开头的公开链接……"></textarea>
-            <small class="field-help">{{ inputLooksLikeUrl ? '已识别为公开链接：提交后将定向读取并解析正文。' : '仅当全部内容是单个 HTTP/HTTPS 链接时才会打开；其他内容按文本保存。' }}</small>
-          </label>
-          <p v-if="error" class="error">{{ error }}</p>
-          <button class="primary" :disabled="isPublicDemo || busy || !sourceReady">
-            <span>{{ isPublicDemo ? '公开演示不提交数据' : (busy && savedSource ? '材料已保存 · AI 后台整理中' : (busy ? '正在识别并保存材料' : (inputLooksLikeUrl ? '读取链接并整理' : (charCount <= 600 ? '快速记录并整理' : '开始生成知识草稿')))) }}</span><b>→</b>
-          </button>
-          <div v-if="savedSource" class="capture-receipt">
-            <b>✓ {{ savedSource.origin_type === 'url' ? '网页正文已记录' : '原文已记录' }}</b>
-            <span>{{ savedSource.char_count }} 字 · {{ savedSource.save_ms }} ms</span>
-            <p>AI 整理在后台继续；记录不会因为模型等待或重试而丢失。</p>
-          </div>
-        </form>
-
-        <aside class="run-panel">
-          <div class="section-heading compact">
-            <span>02</span>
-            <div><h2>Agent 在做什么</h2><p>展示可审计的计划、动作、工具和校验结果；不展示隐式思维链。</p></div>
-          </div>
-          <div v-if="busy || run" class="activity-card">
-            <div class="activity-orb" :class="{ active: busy }"><i></i></div>
-            <div>
-              <small>CURRENT ACTION · {{ processingMode }}</small>
-              <strong>{{ currentActivity }}</strong>
-              <p>已用时 {{ formatElapsed(elapsedSeconds) }} · 最近反馈 {{ signalAge }} 秒前</p>
-            </div>
-          </div>
-          <button v-if="busy || run" type="button" class="task-list-toggle" :aria-expanded="tasksExpanded" @click="tasksExpanded = !tasksExpanded">
-            <span><strong>任务轨迹</strong><small>{{ events.length }} 项 · {{ runFinished ? '本轮已结束' : '执行中' }}</small></span>
-            <b>{{ tasksExpanded ? '收起 ↑' : '展开 ↓' }}</b>
-          </button>
-          <div v-if="!run && !busy" class="empty-run">
-            <div class="orbit"><span></span></div>
-            <p>提交材料后，运行事件会实时出现在这里。</p>
-          </div>
-          <div v-else v-show="tasksExpanded" class="task-details">
-            <div class="run-state">
-              <div><small>RUN STATUS</small><strong>{{ run ? (stateLabels[run.state] || run.state) : '正在提交' }}</strong></div>
-              <b>{{ progress }}%</b>
-            </div>
-            <div class="progress"><i :style="{ width: `${progress}%` }"></i></div>
-            <ol v-if="events.length" class="event-list">
-              <li v-for="item in events" :key="item.seq">
-                <span>{{ String(item.seq).padStart(2, '0') }}</span>
-                <div><strong>{{ eventTitle(item) }}</strong><small>{{ formatTime(item.created_at) }} · {{ item.event_type }}</small></div>
-              </li>
-            </ol>
-            <div v-else class="waiting-events"><i></i><span>正在建立实时事件连接，界面会持续报告状态</span></div>
+      <section v-if="activeView === 'organize'" class="agent-chat-layout">
+        <button v-if="historyOpen" class="history-backdrop" aria-label="关闭历史记录" @click="historyOpen = false"></button>
+        <aside class="chat-history" :class="{ open: historyOpen }">
+          <header><strong>历史对话</strong><button type="button" aria-label="关闭历史记录" @click="historyOpen = false">×</button></header>
+          <button type="button" class="new-chat" :disabled="busy" @click="newConversation"><span>✎</span> 新对话</button>
+          <div class="history-list">
+            <template v-for="group in groupedConversations" :key="group.label">
+              <p class="history-group-label">{{ group.label }}</p>
+              <button
+                v-for="item in group.items"
+                :key="item.id"
+                type="button"
+                :class="{ active: activeConversation?.id === item.id }"
+                :disabled="busy"
+                @click="openConversation(item.id)"
+              ><strong>{{ item.title }}</strong><small>{{ item.turn_count }} 次整理</small></button>
+            </template>
+            <div v-if="historyError" class="history-error"><span>{{ historyError }}</span><button type="button" @click="loadConversations">重试</button></div>
+            <p v-else-if="!conversations.length" class="history-empty">发送第一条消息后，对话会保存在这里。</p>
           </div>
         </aside>
-      </section>
 
-      <section v-if="activeView === 'organize' && draft" class="draft-section">
-        <div class="section-heading">
-          <span>03</span>
-          <div><h2>知识草稿</h2><p>{{ draft.agent_summary.overview }} 请先审阅，再确认。</p></div>
-        </div>
-        <div class="unit-grid">
-          <article v-for="unit in draft.units" :key="unit.id" class="unit-card">
-            <header><span>UNIT {{ String(unit.position).padStart(2, '0') }}</span><b>{{ Math.round(unit.confidence * 100) }}% confidence</b></header>
-            <h3>{{ unit.title }}</h3>
-            <p class="objective">{{ unit.learning_objective }}</p>
-            <p>{{ unit.explanation }}</p>
-            <div class="question"><small>OPEN QUESTION</small><strong>{{ unit.question }}</strong></div>
-            <details><summary>查看答案要点与证据</summary><ul><li v-for="point in unit.answer_key" :key="point">{{ point }}</li></ul><blockquote v-if="unit.evidence[0]">“{{ unit.evidence[0].quote }}”</blockquote></details>
-          </article>
-        </div>
-        <button v-if="draft.status !== 'confirmed'" class="confirm" :disabled="busy" @click="confirmDraft">我已审阅，确认这份草稿 <span>✓</span></button>
-        <p v-else class="confirmed">草稿已确认。学习目标已成为待审批的记忆候选。</p>
-      </section>
+        <section class="chat-main">
+          <header class="chat-header">
+            <button type="button" class="history-trigger" aria-label="打开历史对话" @click="historyOpen = true">☰</button>
+            <strong>{{ activeConversation?.title || '整理' }}</strong>
+            <button type="button" class="compose-trigger" aria-label="新建对话" :disabled="busy" @click="newConversation">✎</button>
+          </header>
 
-      <section v-if="activeView === 'organize' && memoryCandidates.length" class="memory-section">
-        <div class="section-heading compact"><span>04</span><div><h2>记忆审批</h2><p>草稿确认不等于长期记忆写入。</p></div></div>
-        <article v-for="candidate in memoryCandidates" :key="candidate.id" class="memory-card">
-          <div><small>{{ candidate.kind }} · PENDING</small><strong>{{ candidate.content }}</strong><p>{{ candidate.rationale }}</p></div>
-          <div><button @click="decideMemory(candidate, 'reject')">不保存</button><button class="approve" @click="decideMemory(candidate, 'approve')">批准写入</button></div>
-        </article>
+          <div class="chat-thread">
+            <div v-if="error" class="organize-inline-error"><span>{{ error }}</span><button type="button" @click="error = ''">关闭</button></div>
+
+            <div v-if="!conversationTurns.length && !busy" class="chat-welcome">
+              <span>M</span><h1>今天想记住什么？</h1><p>粘贴文章、链接，或者直接问我</p>
+              <div class="quick-action-chips">
+                <button type="button" @click="chooseQuickAction('粘贴要总结的文章或链接…')">总结文章</button>
+                <button type="button" @click="chooseQuickAction('写下你想记住的知识…')">记录知识</button>
+                <button type="button" @click="chooseQuickAction('写下需要梳理的想法…')">整理想法</button>
+                <button type="button" @click="chooseQuickAction('写下你想理解的问题…')">问一个问题</button>
+              </div>
+            </div>
+
+            <template v-for="turn in conversationTurns" :key="turn.id">
+              <article class="user-turn">
+                <div v-if="turnIsUrl(turn)" class="source-preview-card"><span>🌐</span><div><small>网页</small><strong>{{ turnHostname(turn) }}</strong><p>{{ turnShortUrl(turn) }}</p></div></div>
+                <div v-else-if="turnIsLongText(turn)" class="source-preview-card document-card"><span>📄</span><div><small>长文本 · {{ turn.user_content.length.toLocaleString() }} 字</small><p :class="{ expanded: turnExpanded(turn) }">{{ turnExpanded(turn) ? turn.user_content : turnPreview(turn) }}</p><button type="button" @click="toggleTurn(turn)">{{ turnExpanded(turn) ? '收起原文' : '展开原文' }}</button></div></div>
+                <p v-else>{{ turn.user_content }}</p>
+              </article>
+
+              <article v-if="turn.assistant_summary || turn.draft" class="assistant-turn">
+                <span class="assistant-avatar">M</span>
+                <div><small class="intent-badge">知识整理</small><p v-if="turn.assistant_summary" class="assistant-copy">{{ turn.assistant_summary }}</p>
+                  <section v-if="turn.draft" class="memory-result-card">
+                    <header><span>🧠</span><div><strong>已整理 {{ turn.draft.units.length }} 条记忆</strong><small>{{ turn.draft.units.length }} 个知识点 · {{ turn.draft.units.length }} 个复习问题</small></div></header>
+                    <ul><li v-for="unit in turn.draft.units.slice(0, 3)" :key="unit.id">{{ unit.title }}</li></ul>
+                    <button type="button" class="result-toggle" @click="expandedResultId = expandedResultId === turn.draft.id ? '' : turn.draft.id"><span>{{ expandedResultId === turn.draft.id ? '收起' : '查看全部' }}</span><b>{{ expandedResultId === turn.draft.id ? '⌃' : '›' }}</b></button>
+                    <div v-if="expandedResultId === turn.draft.id" class="result-details">
+                      <article v-for="unit in turn.draft.units" :key="unit.id"><strong>{{ unit.position }}. {{ unit.title }}</strong><p>{{ unit.explanation }}</p><div><small>复习问题</small><b>{{ unit.question }}</b></div><blockquote v-if="unit.evidence[0]">“{{ unit.evidence[0].quote }}”</blockquote></article>
+                      <button v-if="turn.draft.id === draft?.id && turn.draft.status !== 'confirmed'" class="confirm" :disabled="busy" @click="confirmDraft">确认并加入复习</button>
+                      <p v-else-if="turn.draft.status === 'confirmed'" class="confirmed">✓ 已加入复习队列</p>
+                    </div>
+                  </section>
+                </div>
+              </article>
+            </template>
+
+            <article v-if="busy" class="assistant-turn processing-turn"><span class="assistant-avatar">M</span><div>
+              <button type="button" class="inline-processing" @click="tasksExpanded = !tasksExpanded"><i></i><span>{{ currentActivity || '正在整理…' }}</span><b>{{ tasksExpanded ? '⌃' : '⌄' }}</b></button>
+              <div v-show="tasksExpanded" class="processing-details"><div class="progress"><i :style="{ width: `${progress}%` }"></i></div><ol v-if="events.length"><li v-for="item in events" :key="item.seq"><span>{{ eventTitle(item) }}</span><small>{{ formatTime(item.created_at) }}</small></li></ol></div>
+            </div></article>
+
+            <article v-for="candidate in memoryCandidates" :key="candidate.id" class="chat-memory-approval">
+              <small>长期记忆建议</small><strong>{{ candidate.content }}</strong><p>{{ candidate.rationale }}</p>
+              <footer><button type="button" @click="decideMemory(candidate, 'reject')">忽略</button><button type="button" @click="decideMemory(candidate, 'approve')">保存</button></footer>
+            </article>
+          </div>
+
+          <form class="chat-composer" @submit.prevent="startRun">
+            <textarea ref="composerTextarea" v-model="form.content" rows="1" :disabled="isPublicDemo || busy" :maxlength="sourceMaxChars" :placeholder="composerPlaceholder" @input="resizeComposer"></textarea>
+            <footer class="composer-toolbar">
+              <button type="button" class="attachment-trigger" aria-label="添加内容" :disabled="isPublicDemo || busy" @click="attachmentSheetOpen = true">＋</button>
+              <span class="composer-spacer"></span><small v-if="showCharacterCount">{{ charCount.toLocaleString() }} / {{ sourceMaxChars.toLocaleString() }}</small>
+              <button class="send-message" :disabled="isPublicDemo || busy || !sourceReady" aria-label="发送给 Agent">↑</button>
+            </footer>
+          </form>
+        </section>
+
+        <div v-if="attachmentSheetOpen" class="composer-sheet-backdrop" @click="attachmentSheetOpen = false"></div>
+        <section class="composer-sheet" :class="{ open: attachmentSheetOpen }"><i></i><header><strong>添加内容</strong><button type="button" @click="attachmentSheetOpen = false">完成</button></header><button type="button" @click="addLinkFromSheet">添加链接</button><button type="button" @click="pasteFromClipboard">粘贴剪贴板内容</button></section>
       </section>
 
       <section v-if="activeView === 'review'" class="review-page">
@@ -935,9 +1086,13 @@ onMounted(() => {
               <span><strong>提醒时间</strong><small>每天优先在这个时间开始复习</small></span>
               <input v-model="reminder.preferred_time" type="time" :disabled="isPublicDemo || !reminder.enabled" />
             </label>
-            <label class="setting-row">
+            <label class="setting-row limit-range-setting">
               <span><strong>每日上限</strong><small>避免一次出现太多任务</small></span>
-              <input v-model.number="reminder.daily_limit" type="number" min="1" max="100" :disabled="isPublicDemo || !reminder.enabled" />
+              <span class="range-control">
+                <strong>{{ reminder.daily_limit }} 条</strong>
+                <input v-model.number="reminder.daily_limit" type="range" min="1" max="100" step="1" :disabled="isPublicDemo || !reminder.enabled" />
+                <small><i>1</i><i>100</i></small>
+              </span>
             </label>
             <label class="setting-row switch-row">
               <input v-model="reminder.overdue_enabled" type="checkbox" :disabled="isPublicDemo || !reminder.enabled" />

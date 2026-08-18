@@ -124,6 +124,56 @@ class DraftRead(ApiModel):
     units: list[DraftUnitRead]
 
 
+class ConversationRead(ApiModel):
+    id: UUID
+    title: str
+    title_status: str
+    turn_count: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class ConversationUpdate(ApiModel):
+    title: str = Field(min_length=1, max_length=100)
+
+
+class ConversationTurnCreate(SourceResolveCreate):
+    learning_goal: str = Field(
+        default="准确整理并记住这份材料",
+        min_length=1,
+        max_length=500,
+    )
+    idempotency_key: str = Field(min_length=8, max_length=128)
+
+
+class ConversationTurnRead(ApiModel):
+    id: UUID
+    position: int
+    user_content: str
+    source_id: UUID | None
+    run_id: UUID | None
+    run_state: str | None
+    assistant_summary: str | None
+    draft: DraftRead | None
+    created_at: datetime
+
+
+class ConversationDetailRead(ApiModel):
+    conversation: ConversationRead
+    turns: list[ConversationTurnRead]
+
+
+class ConversationTurnHistoryRead(ApiModel):
+    items: list[ConversationTurnRead]
+    next_after_position: int | None
+
+
+class ConversationTurnStartRead(ApiModel):
+    conversation: ConversationRead
+    turn: ConversationTurnRead
+    run: RunRead
+
+
 class DraftRevision(ApiModel):
     feedback: str = Field(min_length=1, max_length=2_000)
 

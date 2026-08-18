@@ -100,9 +100,13 @@ Page({
     this.setData({ 'form.ai_evaluation_enabled': event.detail.value, saved: false })
   },
 
-  changeLimit(event) {
-    const delta = Number(event.currentTarget.dataset.delta)
-    const dailyLimit = Math.max(1, Math.min(100, this.data.form.daily_limit + delta))
+  onLimitChanging(event) {
+    const dailyLimit = Math.max(1, Math.min(100, Number(event.detail.value)))
+    this.setData({ 'form.daily_limit': dailyLimit, saved: false })
+  },
+
+  onLimitChange(event) {
+    const dailyLimit = Math.max(1, Math.min(100, Number(event.detail.value)))
     this.setData({ 'form.daily_limit': dailyLimit, saved: false })
   },
 

@@ -25,12 +25,28 @@
         </view>
       </picker>
       <view class="hairline"></view>
-      <view class="setting-row {{!form.enabled ? 'setting-row--disabled' : ''}}">
+      <view class="limit-setting {{!form.enabled ? 'setting-row--disabled' : ''}}">
+        <view class="limit-heading">
           <view class="setting-copy"><text>每日建议上限</text><text>只平衡展示负载，不改 FSRS 到期时间</text></view>
-        <view class="stepper">
-          <button aria-label="减少每日建议上限" disabled="{{!form.enabled || form.daily_limit <= 1}}" data-delta="-1" bindtap="changeLimit"><text class="stepper-icon">−</text></button>
-          <text class="stepper-value">{{form.daily_limit}}</text>
-          <button aria-label="增加每日建议上限" disabled="{{!form.enabled || form.daily_limit >= 100}}" data-delta="1" bindtap="changeLimit"><text class="stepper-icon">+</text></button>
+          <text class="limit-value">{{form.daily_limit}} 条</text>
+        </view>
+        <view class="limit-slider-row">
+          <text>1</text>
+          <slider
+            class="limit-slider"
+            min="1"
+            max="100"
+            step="1"
+            value="{{form.daily_limit}}"
+            disabled="{{!form.enabled}}"
+            activeColor="#007AFF"
+            backgroundColor="#D1D1D6"
+            block-color="#FFFFFF"
+            block-size="24"
+            bindchanging="onLimitChanging"
+            bindchange="onLimitChange"
+          />
+          <text>100</text>
         </view>
       </view>
       <view class="hairline"></view>

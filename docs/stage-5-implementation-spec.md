@@ -36,7 +36,19 @@
 
 - `input` 是单个 HTTP/HTTPS URL 时，进入上述公开链接抓取流程。
 - 其他输入均按长文本保存；包含在说明文字中的 URL 不会被自动打开。
-- H5 与小程序只调用这个统一入口，旧的文本和 URL 接口继续保留兼容性。
+- 直接创建 Source 的客户端可调用这个统一入口；聊天式整理页通过会话轮次接口间接复用同一识别逻辑。旧的文本和 URL 接口继续保留兼容性。
+
+### Agent 会话
+
+- `POST /api/v1/conversations`：创建空会话。
+- `GET /api/v1/conversations`：按最近更新时间返回当前用户的历史会话，支持 `limit`、`offset` 和 `include_empty`；默认不返回尚未成功发送任何轮次的空会话。
+- `GET /api/v1/conversations/{id}`：返回会话与轮次，每轮包含用户原文、运行状态、Agent 摘要和已生成草稿。
+- `PATCH /api/v1/conversations/{id}`：修改会话标题，并将标题状态标记为 `custom`。
+- `DELETE /api/v1/conversations/{id}`：删除会话及其轮次记录；已经生成的 Source、Run、草稿和复习卡不随聊天历史删除。
+- `GET /api/v1/conversations/{id}/turns`：按 `after_position` 和 `limit` 增量读取历史轮次，返回 `next_after_position` 游标。
+- `POST /api/v1/conversations/{id}/turns`：统一识别长文本或公开链接，创建 Source 与 Agent Run，并持久化本轮对话；`learning_goal` 可省略，服务端使用统一的整理目标。
+
+迁移 `0007_agent_conversations` 新增 `conversations` 与 `conversation_turns`。会话标题初始为“新对话”；第一轮草稿可用后，使用 AI 生成的首个知识单元标题完成自动命名。
 
 ## 抓取与解析
 
@@ -67,7 +79,7 @@
 
 ## 客户端
 
-H5 与小程序整理页使用同一个输入框，并显示 50,000 字计数和自动识别提示。尚未接入的“允许外部检索”开关不再展示；定向读取用户提交的 URL 不依赖搜索工具。
+H5 与小程序整理页已改为 Agent 对话界面，使用同一个输入框，并显示 50,000 字计数和自动识别提示。两端均有历史入口、可折叠的左侧历史区域和新建对话入口。尚未接入的“允许外部检索”开关不再展示；定向读取用户提交的 URL 不依赖搜索工具。
 
 Agent 任务轨迹在 H5 和小程序中均可滚动，最多保留客户端近期 50 条；进入等待确认、完成或失败状态时自动折叠，点击摘要可再次展开或收起。
 

@@ -1,16 +1,17 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from urllib.parse import urlsplit
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query, Response, status
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select, text
-from sqlalchemy.orm import Session
+from sqlalchemy import func, select, text
+from sqlalchemy.orm import Session, selectinload
 
 from memory_agent.auth import IdentityContext, get_current_identity
 from memory_agent.analytics import get_daily_plan, get_review_insights
@@ -19,6 +20,9 @@ from memory_agent.database import SessionLocal, get_session
 from memory_agent.models import (
     AgentEvent,
     AgentRun,
+    Conversation,
+    ConversationTurn,
+    DraftUnit,
     KnowledgeDraft,
     MemoryCandidate,
     RunState,
@@ -38,6 +42,13 @@ from memory_agent.review import (
 )
 from memory_agent.schemas import (
     DraftRead,
+    ConversationDetailRead,
+    ConversationRead,
+    ConversationTurnCreate,
+    ConversationTurnHistoryRead,
+    ConversationTurnRead,
+    ConversationTurnStartRead,
+    ConversationUpdate,
     EventRead,
     HealthRead,
     MemoryCandidateRead,
@@ -98,6 +109,94 @@ def _run_for_user(session: Session, run_id: UUID, user_id: UUID) -> AgentRun:
     if run is None:
         raise HTTPException(status_code=404, detail="run not found")
     return run
+
+
+def _conversation_for_user(
+    session: Session,
+    *,
+    conversation_id: UUID,
+    user_id: UUID,
+) -> Conversation:
+    conversation = session.scalar(
+        select(Conversation).where(
+            Conversation.id == conversation_id,
+            Conversation.user_id == user_id,
+        )
+    )
+    if conversation is None:
+        raise HTTPException(status_code=404, detail="conversation not found")
+    return conversation
+
+
+def _draft_for_run(
+    session: Session,
+    *,
+    run_id: UUID | None,
+    user_id: UUID,
+) -> KnowledgeDraft | None:
+    if run_id is None:
+        return None
+    return session.scalar(
+        select(KnowledgeDraft)
+        .where(KnowledgeDraft.run_id == run_id, KnowledgeDraft.user_id == user_id)
+        .order_by(KnowledgeDraft.version.desc())
+        .options(selectinload(KnowledgeDraft.units).selectinload(DraftUnit.evidence))
+        .limit(1)
+    )
+
+
+def _refresh_conversation_title(
+    session: Session,
+    *,
+    conversation: Conversation,
+    user_id: UUID,
+) -> None:
+    if conversation.title_status != "pending" or conversation.turn_count == 0:
+        return
+    first_turn = session.scalar(
+        select(ConversationTurn)
+        .where(ConversationTurn.conversation_id == conversation.id)
+        .order_by(ConversationTurn.position.asc())
+        .limit(1)
+    )
+    if first_turn is None:
+        return
+    draft = _draft_for_run(session, run_id=first_turn.run_id, user_id=user_id)
+    if draft is None or not draft.units:
+        return
+    generated_title = draft.units[0].title.strip()
+    if not generated_title:
+        return
+    conversation.title = generated_title[:100]
+    conversation.title_status = "generated"
+    conversation.updated_at = datetime.now(UTC)
+    session.commit()
+
+
+def _conversation_turn_read(
+    session: Session,
+    *,
+    turn: ConversationTurn,
+    user_id: UUID,
+) -> ConversationTurnRead:
+    run = session.get(AgentRun, turn.run_id) if turn.run_id else None
+    draft = _draft_for_run(session, run_id=turn.run_id, user_id=user_id)
+    assistant_summary = None
+    if draft is not None:
+        assistant_summary = str(draft.agent_summary.get("overview") or "知识草稿已生成。")
+    elif run is not None and run.state == RunState.FAILED.value:
+        assistant_summary = run.error_message or "这轮整理失败了，可以重新发送材料。"
+    return ConversationTurnRead(
+        id=turn.id,
+        position=turn.position,
+        user_content=turn.user_content,
+        source_id=turn.source_id,
+        run_id=turn.run_id,
+        run_state=run.state if run else None,
+        assistant_summary=assistant_summary,
+        draft=DraftRead.model_validate(draft) if draft else None,
+        created_at=turn.created_at,
+    )
 
 
 @router.get("/health", response_model=HealthRead)
@@ -449,13 +548,13 @@ def post_source_from_url(
     return SourceRead.model_validate(source)
 
 
-@router.post("/sources/resolve", response_model=SourceRead, status_code=status.HTTP_201_CREATED)
-def post_source_resolve(
+def _resolve_source_data(
+    *,
     data: SourceResolveCreate,
-    session: Session = Depends(get_session),
-    identity: IdentityContext = Depends(get_current_identity),
-) -> SourceRead:
-    user, _profile = _identity(identity)
+    session: Session,
+    user_id: UUID,
+    settings: Settings,
+):
     url = detect_standalone_url(data.input)
     if url is not None:
         if len(url) > 2_048:
@@ -463,7 +562,7 @@ def post_source_resolve(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail={"code": "invalid_url", "message": "公开链接不能超过 2,048 个字符。"},
             )
-        source = _create_source_from_url(
+        return _create_source_from_url(
             data=SourceUrlCreate(
                 url=url,
                 title=data.title,
@@ -471,22 +570,267 @@ def post_source_resolve(
                 web_access_allowed=data.web_access_allowed,
             ),
             session=session,
-            user_id=user.id,
-            settings=identity.settings,
+            user_id=user_id,
+            settings=settings,
         )
-    else:
-        source = create_source(
-            session,
-            user_id=user.id,
-            data=SourceCreate(
-                title=data.title or "快速记录",
-                learning_goal=data.learning_goal,
-                content=data.input,
-                content_type=data.content_type,
-                web_access_allowed=data.web_access_allowed,
-            ),
-        )
+    return create_source(
+        session,
+        user_id=user_id,
+        data=SourceCreate(
+            title=data.title or "快速记录",
+            learning_goal=data.learning_goal,
+            content=data.input,
+            content_type=data.content_type,
+            web_access_allowed=data.web_access_allowed,
+        ),
+    )
+
+
+@router.post("/sources/resolve", response_model=SourceRead, status_code=status.HTTP_201_CREATED)
+def post_source_resolve(
+    data: SourceResolveCreate,
+    session: Session = Depends(get_session),
+    identity: IdentityContext = Depends(get_current_identity),
+) -> SourceRead:
+    user, _profile = _identity(identity)
+    source = _resolve_source_data(
+        data=data,
+        session=session,
+        user_id=user.id,
+        settings=identity.settings,
+    )
     return SourceRead.model_validate(source)
+
+
+@router.post("/conversations", response_model=ConversationRead, status_code=status.HTTP_201_CREATED)
+def post_conversation(
+    session: Session = Depends(get_session),
+    identity: IdentityContext = Depends(get_current_identity),
+) -> ConversationRead:
+    conversation = Conversation(user_id=identity.user.id)
+    session.add(conversation)
+    session.commit()
+    return ConversationRead.model_validate(conversation)
+
+
+@router.get("/conversations", response_model=list[ConversationRead])
+def get_conversations(
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    include_empty: bool = Query(default=False),
+    session: Session = Depends(get_session),
+    identity: IdentityContext = Depends(get_current_identity),
+) -> list[ConversationRead]:
+    query = select(Conversation).where(Conversation.user_id == identity.user.id)
+    if not include_empty:
+        query = query.where(Conversation.turn_count > 0)
+    conversations = list(
+        session.scalars(
+            query.order_by(Conversation.updated_at.desc()).offset(offset).limit(limit)
+        )
+    )
+    for conversation in conversations:
+        _refresh_conversation_title(
+            session,
+            conversation=conversation,
+            user_id=identity.user.id,
+        )
+    conversations.sort(key=lambda item: item.updated_at, reverse=True)
+    return [ConversationRead.model_validate(item) for item in conversations]
+
+
+@router.patch("/conversations/{conversation_id}", response_model=ConversationRead)
+def patch_conversation(
+    conversation_id: UUID,
+    data: ConversationUpdate,
+    session: Session = Depends(get_session),
+    identity: IdentityContext = Depends(get_current_identity),
+) -> ConversationRead:
+    conversation = _conversation_for_user(
+        session,
+        conversation_id=conversation_id,
+        user_id=identity.user.id,
+    )
+    title = data.title.strip()
+    if not title:
+        raise HTTPException(status_code=422, detail="conversation title cannot be blank")
+    conversation.title = title
+    conversation.title_status = "custom"
+    conversation.updated_at = datetime.now(UTC)
+    session.commit()
+    return ConversationRead.model_validate(conversation)
+
+
+@router.delete("/conversations/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_conversation(
+    conversation_id: UUID,
+    session: Session = Depends(get_session),
+    identity: IdentityContext = Depends(get_current_identity),
+) -> Response:
+    conversation = _conversation_for_user(
+        session,
+        conversation_id=conversation_id,
+        user_id=identity.user.id,
+    )
+    session.delete(conversation)
+    session.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/conversations/{conversation_id}", response_model=ConversationDetailRead)
+def get_conversation(
+    conversation_id: UUID,
+    session: Session = Depends(get_session),
+    identity: IdentityContext = Depends(get_current_identity),
+) -> ConversationDetailRead:
+    conversation = _conversation_for_user(
+        session,
+        conversation_id=conversation_id,
+        user_id=identity.user.id,
+    )
+    _refresh_conversation_title(
+        session,
+        conversation=conversation,
+        user_id=identity.user.id,
+    )
+    turns = list(
+        session.scalars(
+            select(ConversationTurn)
+            .where(ConversationTurn.conversation_id == conversation.id)
+            .order_by(ConversationTurn.position.asc())
+        )
+    )
+    return ConversationDetailRead(
+        conversation=ConversationRead.model_validate(conversation),
+        turns=[
+            _conversation_turn_read(session, turn=turn, user_id=identity.user.id)
+            for turn in turns
+        ],
+    )
+
+
+@router.get(
+    "/conversations/{conversation_id}/turns",
+    response_model=ConversationTurnHistoryRead,
+)
+def get_conversation_turns(
+    conversation_id: UUID,
+    after_position: int = Query(default=0, ge=0),
+    limit: int = Query(default=50, ge=1, le=100),
+    session: Session = Depends(get_session),
+    identity: IdentityContext = Depends(get_current_identity),
+) -> ConversationTurnHistoryRead:
+    conversation = _conversation_for_user(
+        session,
+        conversation_id=conversation_id,
+        user_id=identity.user.id,
+    )
+    turns = list(
+        session.scalars(
+            select(ConversationTurn)
+            .where(
+                ConversationTurn.conversation_id == conversation.id,
+                ConversationTurn.position > after_position,
+            )
+            .order_by(ConversationTurn.position.asc())
+            .limit(limit + 1)
+        )
+    )
+    has_more = len(turns) > limit
+    page = turns[:limit]
+    return ConversationTurnHistoryRead(
+        items=[
+            _conversation_turn_read(session, turn=turn, user_id=identity.user.id)
+            for turn in page
+        ],
+        next_after_position=page[-1].position if has_more and page else None,
+    )
+
+
+@router.post(
+    "/conversations/{conversation_id}/turns",
+    response_model=ConversationTurnStartRead,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def post_conversation_turn(
+    conversation_id: UUID,
+    data: ConversationTurnCreate,
+    background_tasks: BackgroundTasks,
+    session: Session = Depends(get_session),
+    identity: IdentityContext = Depends(get_current_identity),
+) -> ConversationTurnStartRead:
+    user, profile = _identity(identity)
+    conversation = _conversation_for_user(
+        session,
+        conversation_id=conversation_id,
+        user_id=user.id,
+    )
+    existing = session.scalar(
+        select(ConversationTurn).where(
+            ConversationTurn.conversation_id == conversation.id,
+            ConversationTurn.idempotency_key == data.idempotency_key,
+        )
+    )
+    if existing is not None:
+        if existing.run_id is None:
+            raise HTTPException(status_code=409, detail="conversation turn has no run")
+        run = _run_for_user(session, existing.run_id, user.id)
+        return ConversationTurnStartRead(
+            conversation=ConversationRead.model_validate(conversation),
+            turn=_conversation_turn_read(session, turn=existing, user_id=user.id),
+            run=RunRead.model_validate(run),
+        )
+
+    source = _resolve_source_data(
+        data=SourceResolveCreate(
+            input=data.input,
+            title=data.title,
+            learning_goal=data.learning_goal,
+            content_type=data.content_type,
+            web_access_allowed=data.web_access_allowed,
+        ),
+        session=session,
+        user_id=user.id,
+        settings=identity.settings,
+    )
+    run_key = hashlib.sha256(
+        f"{conversation.id}:{data.idempotency_key}".encode("utf-8")
+    ).hexdigest()
+    run, job, created = create_run(
+        session,
+        user_id=user.id,
+        profile=profile,
+        source_id=source.id,
+        idempotency_key=run_key,
+        settings=identity.settings,
+    )
+    position = int(
+        session.scalar(
+            select(func.coalesce(func.max(ConversationTurn.position), 0)).where(
+                ConversationTurn.conversation_id == conversation.id
+            )
+        )
+        or 0
+    ) + 1
+    turn = ConversationTurn(
+        conversation_id=conversation.id,
+        position=position,
+        idempotency_key=data.idempotency_key,
+        user_content=data.input.strip(),
+        source_id=source.id,
+        run_id=run.id,
+    )
+    session.add(turn)
+    conversation.turn_count = position
+    conversation.updated_at = datetime.now(UTC)
+    session.commit()
+    if created and identity.settings.inline_worker:
+        background_tasks.add_task(get_job_runner().run_job, job.id)
+    return ConversationTurnStartRead(
+        conversation=ConversationRead.model_validate(conversation),
+        turn=_conversation_turn_read(session, turn=turn, user_id=user.id),
+        run=RunRead.model_validate(run),
+    )
 
 
 @router.post("/runs", response_model=RunRead, status_code=status.HTTP_202_ACCEPTED)
