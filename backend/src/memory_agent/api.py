@@ -26,6 +26,7 @@ from memory_agent.models import (
     KnowledgeDraft,
     MemoryCandidate,
     RunState,
+    Source,
     TERMINAL_RUN_STATES,
 )
 from memory_agent.runtime import get_job_runner
@@ -180,6 +181,9 @@ def _conversation_turn_read(
     user_id: UUID,
 ) -> ConversationTurnRead:
     run = session.get(AgentRun, turn.run_id) if turn.run_id else None
+    source = session.get(Source, turn.source_id) if turn.source_id else None
+    if source is not None and source.user_id != user_id:
+        source = None
     draft = _draft_for_run(session, run_id=turn.run_id, user_id=user_id)
     assistant_summary = None
     if draft is not None:
@@ -191,6 +195,9 @@ def _conversation_turn_read(
         position=turn.position,
         user_content=turn.user_content,
         source_id=turn.source_id,
+        source_type=source.origin_type if source else None,
+        source_title=source.title if source else None,
+        source_url=source.origin_url if source and source.origin_type == "url" else None,
         run_id=turn.run_id,
         run_state=run.state if run else None,
         assistant_summary=assistant_summary,

@@ -197,16 +197,16 @@ function friendlyError(reason, fallback = '操作失败，请重试') {
   return message || fallback
 }
 
-function parsedTurnUrl(content) {
-  const value = String(content || '').trim()
-  if (!/^https?:\/\/\S+$/i.test(value)) return null
-  try { return new URL(value) } catch { return null }
+function turnSourceUrl(turn) {
+  if (turn.source_type !== 'url' || !turn.source_url) return null
+  try { return new URL(turn.source_url) } catch { return null }
 }
 
-function turnIsUrl(turn) { return Boolean(parsedTurnUrl(turn.user_content)) }
-function turnHostname(turn) { return parsedTurnUrl(turn.user_content)?.hostname.replace(/^www\./, '') || '' }
+function turnIsUrl(turn) { return Boolean(turnSourceUrl(turn)) }
+function turnHostname(turn) { return turnSourceUrl(turn)?.hostname.replace(/^www\./, '') || '' }
+function turnSourceTitle(turn) { return turn.source_title || turnHostname(turn) }
 function turnShortUrl(turn) {
-  const url = parsedTurnUrl(turn.user_content)
+  const url = turnSourceUrl(turn)
   return url ? `${url.origin}${url.pathname === '/' ? '' : url.pathname}`.slice(0, 96) : ''
 }
 function turnIsLongText(turn) { return !turnIsUrl(turn) && String(turn.user_content || '').length > 420 }
@@ -938,7 +938,7 @@ onMounted(() => {
     </header>
 
     <main>
-      <nav class="view-tabs" aria-label="主要功能">
+      <nav v-show="!historyOpen" class="view-tabs" aria-label="主要功能">
         <button :class="{ active: activeView === 'organize' }" @click="showView('organize')">
           <span>01</span><strong>整理</strong><small>材料转知识</small>
         </button>
@@ -980,7 +980,7 @@ onMounted(() => {
         <section class="chat-main">
           <header class="chat-header">
             <button type="button" class="history-trigger" aria-label="打开历史对话" @click="historyOpen = true">☰</button>
-            <strong>{{ activeConversation?.title || '整理' }}</strong>
+            <strong class="chat-header-title" :title="activeConversation?.title || '整理'">{{ activeConversation?.title || '整理' }}</strong>
             <button type="button" class="compose-trigger" aria-label="新建对话" :disabled="canceling" @click="newConversation">✎</button>
           </header>
 
@@ -999,7 +999,7 @@ onMounted(() => {
 
             <template v-for="turn in conversationTurns" :key="turn.id">
               <article class="user-turn">
-                <div v-if="turnIsUrl(turn)" class="source-preview-card"><span>🌐</span><div><small>网页</small><strong>{{ turnHostname(turn) }}</strong><p>{{ turnShortUrl(turn) }}</p></div></div>
+                <div v-if="turnIsUrl(turn)" class="source-preview-card"><span>🌐</span><div><small>来源 · {{ turnHostname(turn) }}</small><strong>{{ turnSourceTitle(turn) }}</strong><p>{{ turnShortUrl(turn) }}</p><a :href="turn.source_url" target="_blank" rel="noopener noreferrer">查看原文 ↗</a></div></div>
                 <div v-else-if="turnIsLongText(turn)" class="source-preview-card document-card"><span>📄</span><div><small>长文本 · {{ turn.user_content.length.toLocaleString() }} 字</small><p :class="{ expanded: turnExpanded(turn) }">{{ turnExpanded(turn) ? turn.user_content : turnPreview(turn) }}</p><button type="button" @click="toggleTurn(turn)">{{ turnExpanded(turn) ? '收起原文' : '展开原文' }}</button></div></div>
                 <p v-else>{{ turn.user_content }}</p>
               </article>

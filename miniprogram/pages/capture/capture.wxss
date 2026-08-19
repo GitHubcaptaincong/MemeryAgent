@@ -12,7 +12,6 @@
   z-index: 30;
   display: grid;
   flex: none;
-  grid-template-columns: 88rpx minmax(0, 1fr) 88rpx;
   align-items: center;
   padding: 0 16rpx;
   border-bottom: 1rpx solid rgba(60, 60, 67, 0.12);
@@ -21,6 +20,7 @@
 
 .app-bar-title {
   align-self: center;
+  min-width: 0;
   overflow: hidden;
   padding: 0 12rpx;
   font-size: 34rpx;
@@ -528,6 +528,11 @@
   color: #3a3a3c;
   font-size: 22rpx;
   line-height: 1.5;
+}
+
+.app-bar-safe-area {
+  width: 100%;
+  height: 72rpx;
 }
 
 .processing-facts { margin-top: 12rpx; }

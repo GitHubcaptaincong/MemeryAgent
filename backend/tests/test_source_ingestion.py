@@ -144,6 +144,26 @@ def test_long_text_and_public_url_sources_keep_origin_evidence(monkeypatch: pyte
         assert source["retrieved_at"] == "2026-08-17T08:00:00Z"
         assert source["origin_content_hash"] == "a" * 64
 
+        conversation = client.post("/api/v1/conversations").json()
+        turn_response = client.post(
+            f"/api/v1/conversations/{conversation['id']}/turns",
+            json={
+                "input": "https://example.com/original",
+                "learning_goal": "理解主动回忆与间隔复习",
+                "web_access_allowed": False,
+                "idempotency_key": "url-conversation-turn-0001",
+            },
+        )
+        assert turn_response.status_code == 202, turn_response.text
+        source_turn = turn_response.json()["turn"]
+        assert source_turn["source_type"] == "url"
+        assert source_turn["source_title"] == "公开学习材料"
+        assert source_turn["source_url"] == "https://example.com/learning"
+        history_turn = client.get(
+            f"/api/v1/conversations/{conversation['id']}"
+        ).json()["turns"][0]
+        assert history_turn["source_url"] == "https://example.com/learning"
+
         run_response = client.post(
             "/api/v1/runs",
             json={"source_id": source["id"], "idempotency_key": "url-source-test-0001"},

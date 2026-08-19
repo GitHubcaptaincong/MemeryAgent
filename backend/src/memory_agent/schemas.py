@@ -151,6 +151,9 @@ class ConversationTurnRead(ApiModel):
     position: int
     user_content: str
     source_id: UUID | None
+    source_type: str | None = None
+    source_title: str | None = None
+    source_url: str | None = None
     run_id: UUID | None
     run_state: str | None
     assistant_summary: str | None

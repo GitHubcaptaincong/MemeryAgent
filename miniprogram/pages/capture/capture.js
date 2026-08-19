@@ -48,9 +48,14 @@ function standaloneUrl(value) {
   }
 }
 
+function sourceUrl(turn) {
+  if (turn.source_type !== 'url' || !turn.source_url) return null
+  return standaloneUrl(turn.source_url)
+}
+
 function decorateTurn(turn, expandedTurnIds = {}) {
   const content = String(turn.user_content || '')
-  const url = standaloneUrl(content)
+  const url = sourceUrl(turn)
   const draft = turn.draft
     ? { ...turn.draft, previewUnits: (turn.draft.units || []).slice(0, 3) }
     : null
@@ -58,6 +63,8 @@ function decorateTurn(turn, expandedTurnIds = {}) {
     ...turn,
     draft,
     isUrl: Boolean(url),
+    sourceUrl: url ? turn.source_url : '',
+    sourceTitle: url ? (turn.source_title || url.hostname.replace(/^www\./, '')) : '',
     hostname: url ? url.hostname.replace(/^www\./, '') : '',
     shortUrl: url ? `${url.origin}${url.pathname === '/' ? '' : url.pathname}`.slice(0, 96) : '',
     isLongText: !url && content.length > 420,
@@ -99,6 +106,7 @@ Page({
   data: {
     statusBarHeight: 20,
     navBarHeight: 44,
+    headerRightSafeWidth: 48,
     content: '',
     charCount: 0,
     historyOpen: false,
@@ -144,7 +152,11 @@ Page({
     const navBarHeight = menuRect && menuRect.top
       ? (menuRect.top - statusBarHeight) * 2 + menuRect.height
       : 44
-    this.setData({ statusBarHeight, navBarHeight })
+    const windowWidth = windowInfo.windowWidth || 375
+    const headerRightSafeWidth = menuRect && menuRect.left
+      ? Math.max(48, windowWidth - menuRect.left + 4)
+      : 48
+    this.setData({ statusBarHeight, navBarHeight, headerRightSafeWidth })
     this.loadConversations()
     const activeConversationId = wx.getStorageSync('memoryAgentActiveConversationId')
     if (activeConversationId) this.loadConversation(activeConversationId, false)
@@ -162,17 +174,19 @@ Page({
 
   onShow() {
     const tabBar = typeof this.getTabBar === 'function' && this.getTabBar()
-    if (tabBar) tabBar.setData({ selected: 0 })
+    if (tabBar) tabBar.setData({ selected: 0, hidden: Boolean(this.data.historyOpen) })
     this.loadConversations()
     if (this.data.busy && this.data.run && !terminalStates.includes(this.data.run.state)) this.schedulePoll(0)
   },
 
   onHide() {
     this.stopPolling()
+    this.setTabBarHidden(false)
   },
 
   onUnload() {
     this.stopPolling()
+    this.setTabBarHidden(false)
     if (this.submitRequestTask && typeof this.submitRequestTask.abort === 'function') {
       this.submitRequestTask.abort()
     }
@@ -278,11 +292,27 @@ Page({
 
   openHistory() {
     this.setData({ historyOpen: true })
+    this.setTabBarHidden(true)
     this.loadConversations()
   },
 
   closeHistory() {
     this.setData({ historyOpen: false })
+    this.setTabBarHidden(false)
+  },
+
+  setTabBarHidden(hidden) {
+    const tabBar = typeof this.getTabBar === 'function' && this.getTabBar()
+    if (tabBar) tabBar.setData({ hidden: Boolean(hidden) })
+  },
+
+  copySourceLink(event) {
+    const url = String(event.currentTarget.dataset.url || '')
+    if (!url) return
+    wx.setClipboardData({
+      data: url,
+      fail: () => wx.showToast({ title: '复制失败，请重试', icon: 'none' }),
+    })
   },
 
   async selectConversation(event) {
@@ -319,6 +349,7 @@ Page({
         this.lastEventSeq = 0
         this.schedulePoll(0)
       }
+      if (closeDrawer) this.setTabBarHidden(false)
       this.scrollToBottom()
     } catch (error) {
       this.setData({ error: friendlyError(error, '对话加载失败，请重试。') })
@@ -353,6 +384,7 @@ Page({
       currentActivity: '等待记录',
       composerPlaceholder: '发消息、粘贴文章或链接…',
     })
+    this.setTabBarHidden(false)
   },
 
   confirmStopForNewConversation() {

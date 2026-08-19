@@ -1,4 +1,4 @@
-<view class="ios-tabbar">
+<view wx:if="{{!hidden}}" class="ios-tabbar">
   <view class="ios-tabbar__content">
     <view wx:for="{{tabs}}" wx:key="pagePath" class="tab-item {{selected === index ? 'tab-item--active' : ''}}" data-index="{{index}}" data-path="{{item.pagePath}}" bindtap="switchTab">
       <view class="tab-icon-wrap">

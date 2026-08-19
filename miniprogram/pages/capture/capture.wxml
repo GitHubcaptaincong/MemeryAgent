@@ -32,14 +32,12 @@
     </scroll-view>
   </view>
 
-  <view class="top-app-bar" style="height: {{statusBarHeight + navBarHeight}}px; padding-top: {{statusBarHeight}}px;">
+  <view class="top-app-bar" style="height: {{statusBarHeight + navBarHeight}}px; padding-top: {{statusBarHeight}}px; grid-template-columns: 48px minmax(0, 1fr) {{headerRightSafeWidth}}px;">
     <button class="app-icon-button" aria-label="打开历史对话" bindtap="openHistory">
       <view class="menu-icon"><text></text><text></text><text></text></view>
     </button>
     <text class="app-bar-title">{{activeConversation ? activeConversation.title : '整理'}}</text>
-    <button class="app-icon-button" aria-label="新建对话" disabled="{{canceling}}" bindtap="newConversation">
-      <view class="compose-icon"><view class="compose-box"></view><view class="compose-stroke"></view></view>
-    </button>
+    <view class="app-bar-safe-area" aria-hidden="true"></view>
   </view>
 
   <scroll-view
@@ -73,9 +71,10 @@
           <view wx:if="{{item.isUrl}}" class="source-preview link-preview">
             <view class="source-icon">🌐</view>
             <view class="source-preview-copy">
-              <text class="source-type">网页</text>
-              <text class="source-title">{{item.hostname}}</text>
+              <text class="source-type">来源 · {{item.hostname}}</text>
+              <text class="source-title">{{item.sourceTitle}}</text>
               <text class="source-meta">{{item.shortUrl}}</text>
+              <text class="source-action" data-url="{{item.sourceUrl}}" catchtap="copySourceLink">复制原文链接</text>
             </view>
           </view>
           <view wx:elif="{{item.isLongText}}" class="source-preview document-preview">

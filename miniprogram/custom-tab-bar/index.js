@@ -2,6 +2,7 @@ Component({
   data: {
     selected: 0,
     badge: 0,
+    hidden: false,
     tabs: [
       { pagePath: '/pages/capture/capture', text: '整理', icon: '＋' },
       { pagePath: '/pages/review/review', text: '复习', icon: '◉' },

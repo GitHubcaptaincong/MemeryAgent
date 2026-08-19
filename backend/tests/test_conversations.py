@@ -40,6 +40,8 @@ def test_conversation_persists_turn_and_gets_ai_title_after_first_draft() -> Non
         started = turn_response.json()
         assert started["turn"]["position"] == 1
         assert started["turn"]["user_content"] == turn_payload["input"]
+        assert started["turn"]["source_type"] == "text"
+        assert started["turn"]["source_url"] is None
 
         detail_response = client.get(f"/api/v1/conversations/{conversation['id']}")
         assert detail_response.status_code == 200, detail_response.text
