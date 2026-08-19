@@ -547,11 +547,10 @@ blockquote { border-left: 2px solid #aabd1f; margin: 18px 0 0; padding: 5px 0 5p
 .mini-shell .composer-toolbar > small { flex: none; color: #ff9500; font-size: 9px; }
 .mini-shell .send-message { border: 0; background: #007aff; color: #fff; font-size: 18px; font-weight: 700; }
 .mini-shell .send-message:disabled { background: #e5e5ea; color: #aeaeb2; opacity: 1; }
-.mini-shell .chat-history { top: 0; bottom: 0; padding: 12px 10px; background: #f7f7f8; }
+.mini-shell .chat-history { top: 0; bottom: 0; display: flex; padding: 12px 10px calc(12px + env(safe-area-inset-bottom)); flex-direction: column; background: #f7f7f8; }
 .mini-shell .chat-history header { height: 48px; padding: 0 4px; }
-.mini-shell .chat-history header button { font-size: 24px; }
-.mini-shell .new-chat { display: flex; align-items: center; gap: 8px; margin: 4px 4px 10px; border-radius: 10px; padding: 10px; font-size: 13px; }
-.mini-shell .history-list { max-height: calc(100vh - 116px); padding: 0 4px 16px; }
+.mini-shell .new-chat { display: flex; min-height: 50px; align-items: center; justify-content: center; gap: 10px; margin: 12px 4px 0; border-radius: 12px; padding: 12px 14px; font-size: 15px; }
+.mini-shell .history-list { min-height: 0; max-height: none; flex: 1; overflow-y: auto; padding: 0 4px 16px; }
 .mini-shell .history-group-label { margin: 0; padding: 14px 8px 4px; color: #8e8e93; font-size: 10px; font-weight: 600; }
 .mini-shell .history-list > button { margin: 2px 0; border-radius: 8px; padding: 9px 8px; }
 .mini-shell .history-list > button strong { font-size: 13px; }

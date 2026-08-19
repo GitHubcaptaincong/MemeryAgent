@@ -3,12 +3,7 @@
   <view class="session-drawer {{historyOpen ? 'session-drawer--open' : ''}}" style="padding-top: {{statusBarHeight + 12}}px;">
     <view class="drawer-header">
       <text>历史对话</text>
-      <button class="app-icon-button drawer-close" aria-label="关闭历史对话" bindtap="closeHistory">×</button>
     </view>
-    <button class="drawer-new-chat" disabled="{{canceling}}" bindtap="newConversation">
-      <view class="compose-icon compose-icon--small"><view class="compose-box"></view><view class="compose-stroke"></view></view>
-      <text>新对话</text>
-    </button>
     <scroll-view scroll-y enhanced show-scrollbar class="session-list">
       <block wx:for="{{conversationGroups}}" wx:key="label" wx:for-item="group">
         <text class="session-group-label">{{group.label}}</text>
@@ -30,6 +25,10 @@
       </view>
       <view wx:elif="{{!conversations.length}}" class="drawer-empty">发送第一条消息后，对话会保存在这里。</view>
     </scroll-view>
+    <button class="drawer-new-chat" disabled="{{canceling}}" bindtap="newConversation">
+      <view class="compose-icon compose-icon--small"><view class="compose-box"></view><view class="compose-stroke"></view></view>
+      <text>新对话</text>
+    </button>
   </view>
 
   <view class="top-app-bar" style="height: {{statusBarHeight + navBarHeight}}px; padding-top: {{statusBarHeight}}px; grid-template-columns: 48px minmax(0, 1fr) {{headerRightSafeWidth}}px;">
@@ -42,6 +41,8 @@
 
   <scroll-view
     class="conversation-scroll"
+    bindtouchstart="beginHistorySwipe"
+    bindtouchend="finishHistorySwipe"
     scroll-y
     enhanced
     show-scrollbar="{{false}}"

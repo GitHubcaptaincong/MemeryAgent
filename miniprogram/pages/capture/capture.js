@@ -159,16 +159,30 @@ Page({
     this.setData({ statusBarHeight, navBarHeight, headerRightSafeWidth })
     this.loadConversations()
     const activeConversationId = wx.getStorageSync('memoryAgentActiveConversationId')
-    if (activeConversationId) this.loadConversation(activeConversationId, false)
     const activeRunId = wx.getStorageSync('memoryAgentActiveRunId')
-    if (activeRunId) {
+    if (activeRunId) this.restoreActiveRunIfNeeded(activeRunId, activeConversationId)
+    else wx.removeStorageSync('memoryAgentActiveConversationId')
+  },
+
+  async restoreActiveRunIfNeeded(runId, conversationId) {
+    try {
+      const run = await api.get(`/runs/${runId}`)
+      if (terminalStates.includes(run.state)) {
+        wx.removeStorageSync('memoryAgentActiveRunId')
+        wx.removeStorageSync('memoryAgentActiveConversationId')
+        return
+      }
+      if (conversationId) await this.loadConversation(conversationId, false)
       this.setData({
         busy: true,
-        run: { id: activeRunId, state: 'queued' },
+        run,
         currentActivity: '正在恢复上次运行',
       })
       this.startedAt = Date.now()
-      this.pollRun()
+      this.schedulePoll(0)
+    } catch (error) {
+      wx.removeStorageSync('memoryAgentActiveRunId')
+      wx.removeStorageSync('memoryAgentActiveConversationId')
     }
   },
 
@@ -294,6 +308,21 @@ Page({
     this.setData({ historyOpen: true })
     this.setTabBarHidden(true)
     this.loadConversations()
+  },
+
+  beginHistorySwipe(event) {
+    if (this.data.historyOpen || !event.touches || event.touches.length !== 1) return
+    const touch = event.touches[0]
+    this.historySwipeStart = { x: touch.clientX, y: touch.clientY }
+  },
+
+  finishHistorySwipe(event) {
+    if (!this.historySwipeStart || !event.changedTouches || event.changedTouches.length !== 1) return
+    const touch = event.changedTouches[0]
+    const deltaX = touch.clientX - this.historySwipeStart.x
+    const deltaY = touch.clientY - this.historySwipeStart.y
+    this.historySwipeStart = null
+    if (deltaX >= 72 && Math.abs(deltaX) > Math.abs(deltaY) * 1.35) this.openHistory()
   },
 
   closeHistory() {
@@ -689,7 +718,13 @@ Page({
   async loadMemoryCandidates() {
     try {
       const memoryCandidates = await api.get('/memory-candidates?status=pending')
-      this.setData({ memoryCandidates })
+      const currentRunId = (this.data.draft && this.data.draft.run_id)
+        || (this.data.run && this.data.run.id)
+      this.setData({
+        memoryCandidates: memoryCandidates
+          .filter((item) => item.run_id === currentRunId)
+          .slice(0, 1),
+      })
     } catch (error) {
       this.setData({ error: friendlyError(error) })
     }

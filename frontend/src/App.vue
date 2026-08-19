@@ -76,6 +76,7 @@ let evaluationTimer = null
 let submitController = null
 let stoppingAfterServerError = false
 let pendingTurn = null
+let historySwipeStart = null
 
 const stateLabels = {
   queued: '排队中',
@@ -275,6 +276,7 @@ async function openConversation(conversationId) {
     const latest = detail.turns[detail.turns.length - 1]
     run.value = latest?.run_id ? { id: latest.run_id, state: latest.run_state } : null
     draft.value = latest?.draft || null
+    memoryCandidates.value = []
     events.value = []
     livePulse.value = null
     error.value = ''
@@ -291,6 +293,7 @@ function resetConversationState() {
   conversationTurns.value = []
   run.value = null
   draft.value = null
+  memoryCandidates.value = []
   events.value = []
   livePulse.value = null
   form.value.content = ''
@@ -348,6 +351,7 @@ async function newConversation() {
     if (!await stopActiveRun({ notify: false })) return
   }
   resetConversationState()
+  historyOpen.value = false
 }
 
 async function refreshActiveConversation() {
@@ -589,6 +593,24 @@ async function loadDraft() {
   ))
 }
 
+function beginHistorySwipe(event) {
+  if (historyOpen.value || event.touches.length !== 1) return
+  const touch = event.touches[0]
+  historySwipeStart = { x: touch.clientX, y: touch.clientY }
+}
+
+function finishHistorySwipe(event) {
+  if (!historySwipeStart || event.changedTouches.length !== 1) return
+  const touch = event.changedTouches[0]
+  const deltaX = touch.clientX - historySwipeStart.x
+  const deltaY = touch.clientY - historySwipeStart.y
+  historySwipeStart = null
+  if (deltaX >= 72 && Math.abs(deltaX) > Math.abs(deltaY) * 1.35) {
+    historyOpen.value = true
+    loadConversations().catch(() => {})
+  }
+}
+
 async function confirmDraft() {
   if (!draft.value) return
   if (isPublicDemo) {
@@ -601,7 +623,9 @@ async function confirmDraft() {
     draft.value = await api(`/api/v1/drafts/${draft.value.id}/confirm`, { method: 'POST' })
     await Promise.all([refreshRun(), refreshVisibleEvents()])
     await refreshActiveConversation()
-    memoryCandidates.value = await api('/api/v1/memory-candidates?status=pending')
+    const candidates = await api('/api/v1/memory-candidates?status=pending')
+    const currentRunId = draft.value?.run_id || run.value?.id
+    memoryCandidates.value = candidates.filter((item) => item.run_id === currentRunId).slice(0, 1)
     await loadReviewData()
     await loadKnowledgeSets()
   } catch (reason) {
@@ -1069,8 +1093,7 @@ onMounted(() => {
       <section v-if="activeView === 'organize'" class="agent-chat-layout">
         <button v-if="historyOpen" class="history-backdrop" aria-label="关闭历史记录" @click="historyOpen = false"></button>
         <aside class="chat-history" :class="{ open: historyOpen }">
-          <header><strong>历史对话</strong><button type="button" aria-label="关闭历史记录" @click="historyOpen = false">×</button></header>
-          <button type="button" class="new-chat" :disabled="canceling" @click="newConversation"><span>✎</span> 新对话</button>
+          <header><strong>历史对话</strong></header>
           <div class="history-list">
             <template v-for="group in groupedConversations" :key="group.label">
               <p class="history-group-label">{{ group.label }}</p>
@@ -1086,9 +1109,10 @@ onMounted(() => {
             <div v-if="historyError" class="history-error"><span>{{ historyError }}</span><button type="button" @click="loadConversations">重试</button></div>
             <p v-else-if="!conversations.length" class="history-empty">发送第一条消息后，对话会保存在这里。</p>
           </div>
+          <button type="button" class="new-chat" :disabled="canceling" @click="newConversation"><span>✎</span> 新对话</button>
         </aside>
 
-        <section class="chat-main">
+        <section class="chat-main" @touchstart.passive="beginHistorySwipe" @touchend.passive="finishHistorySwipe">
           <header class="chat-header">
             <button type="button" class="history-trigger" aria-label="打开历史对话" @click="historyOpen = true">☰</button>
             <strong class="chat-header-title" :title="activeConversation?.title || '整理'">{{ activeConversation?.title || '整理' }}</strong>
@@ -1142,9 +1166,9 @@ onMounted(() => {
               </div>
             </div></article>
 
-            <article v-for="candidate in memoryCandidates" :key="candidate.id" class="chat-memory-approval">
-              <small>长期记忆建议</small><strong>{{ candidate.content }}</strong><p>{{ candidate.rationale }}</p>
-              <footer><button type="button" @click="decideMemory(candidate, 'reject')">忽略</button><button type="button" @click="decideMemory(candidate, 'approve')">保存</button></footer>
+            <article v-if="memoryCandidates[0]" class="chat-memory-approval">
+              <small>长期记忆建议</small><strong>{{ memoryCandidates[0].content }}</strong><p>{{ memoryCandidates[0].rationale }}</p>
+              <footer><button type="button" @click="decideMemory(memoryCandidates[0], 'reject')">忽略</button><button type="button" @click="decideMemory(memoryCandidates[0], 'approve')">保存</button></footer>
             </article>
           </div>
 
