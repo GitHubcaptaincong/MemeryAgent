@@ -32,6 +32,8 @@ def create_review_cards_for_draft(
     cards: list[ReviewCard] = []
     scheduler = FsrsReviewScheduler()
     for unit in draft.units:
+        if unit.status != "active":
+            continue
         existing = session.scalar(
             select(ReviewCard).where(
                 ReviewCard.user_id == user_id,
@@ -62,11 +64,16 @@ def create_review_cards_for_draft(
 
 
 def list_due_review_cards(
-    session: Session, *, user_id: UUID, limit: int, now: datetime | None = None
+    session: Session,
+    *,
+    user_id: UUID,
+    limit: int,
+    now: datetime | None = None,
+    knowledge_set_id: UUID | None = None,
 ) -> list[dict[str, Any]]:
     due = now or datetime.now(UTC)
     scheduler = FsrsReviewScheduler()
-    rows = session.execute(
+    statement = (
         select(ReviewCard, DraftUnit, KnowledgeDraft, Source)
         .join(DraftUnit, ReviewCard.draft_unit_id == DraftUnit.id)
         .join(KnowledgeDraft, DraftUnit.draft_id == KnowledgeDraft.id)
@@ -75,10 +82,15 @@ def list_due_review_cards(
             ReviewCard.user_id == user_id,
             ReviewCard.status == "active",
             ReviewCard.due_at <= due,
+            DraftUnit.status == "active",
+            KnowledgeDraft.status == "confirmed",
         )
         .order_by(ReviewCard.due_at, ReviewCard.created_at)
         .limit(limit)
-    ).all()
+    )
+    if knowledge_set_id is not None:
+        statement = statement.where(KnowledgeDraft.id == knowledge_set_id)
+    rows = session.execute(statement).all()
     return [
         _card_payload(
             card,
@@ -103,18 +115,25 @@ def get_review_overview(
     active_filter = (
         ReviewCard.user_id == user_id,
         ReviewCard.status == "active",
+        DraftUnit.status == "active",
+        KnowledgeDraft.status == "confirmed",
+    )
+    active_cards = (
+        select(ReviewCard)
+        .join(DraftUnit, ReviewCard.draft_unit_id == DraftUnit.id)
+        .join(KnowledgeDraft, DraftUnit.draft_id == KnowledgeDraft.id)
     )
     due_count = session.scalar(
-        select(func.count(ReviewCard.id)).where(
+        active_cards.with_only_columns(func.count(ReviewCard.id)).where(
             *active_filter,
             ReviewCard.due_at <= current,
         )
     )
     total_active = session.scalar(
-        select(func.count(ReviewCard.id)).where(*active_filter)
+        active_cards.with_only_columns(func.count(ReviewCard.id)).where(*active_filter)
     )
     next_due_at = session.scalar(
-        select(func.min(ReviewCard.due_at)).where(
+        active_cards.with_only_columns(func.min(ReviewCard.due_at)).where(
             *active_filter,
             ReviewCard.due_at > current,
         )

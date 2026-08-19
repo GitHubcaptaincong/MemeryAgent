@@ -1,4 +1,6 @@
 <view class="page-shell review-page">
+  <view class="section-tabs"><view class="{{section === 'practice' ? 'active' : ''}}" bindtap="showPractice">复习</view><view class="{{section === 'knowledge' ? 'active' : ''}}" bindtap="showKnowledgeSets">知识集</view></view>
+  <block wx:if="{{section === 'practice'}}">
   <view class="large-title review-title">
     <view>
       <text class="large-title__eyebrow">ACTIVE RECALL</text>
@@ -138,4 +140,32 @@
       </view>
     </view>
   </view>
+  </block>
+
+  <block wx:else>
+    <view wx:if="{{error}}" class="error-banner">{{error}}</view>
+    <view wx:if="{{loading}}" class="ios-card loading-card"><view class="loading-dot"></view><text>正在同步知识集</text></view>
+    <block wx:elif="{{knowledgeDetail}}">
+      <view class="knowledge-back" bindtap="backToKnowledgeSets">‹ 返回知识集</view>
+      <view class="knowledge-heading"><text>KNOWLEDGE SET</text><text>{{knowledgeDetail.title}}</text><text>{{knowledgeDetail.learning_goal}}</text><button bindtap="renameKnowledgeSet">编辑标题</button></view>
+      <view class="knowledge-stats">
+        <view><text>{{knowledgeDetail.unit_count}}</text><text>知识点</text></view><view><text>{{knowledgeDetail.review_count}}</text><text>累计知识点复习</text></view><view><text>{{knowledgeDetail.last_reviewed_label}}</text><text>最近复习</text></view><view><text>{{knowledgeDetail.created_label}}</text><text>创建时间</text></view>
+      </view>
+      <view class="ios-card knowledge-source"><view><text>来源</text><text>{{knowledgeDetail.source_label}}</text></view><text wx:if="{{knowledgeDetail.source.origin_url}}" bindtap="copySourceUrl">复制原文链接 ›</text></view>
+      <button class="ios-button knowledge-start" disabled="{{!knowledgeDetail.due_count}}" bindtap="startKnowledgeSetReview">{{knowledgeDetail.due_count ? '开始复习（' + knowledgeDetail.due_count + ' 个到期）' : '当前没有到期知识'}}</button>
+      <text class="section-label">知识点</text>
+      <view class="knowledge-units">
+        <view wx:for="{{knowledgeDetail.units}}" wx:key="id" class="ios-card knowledge-unit">
+          <view class="knowledge-unit__top" data-id="{{item.id}}" bindtap="toggleKnowledgeUnit"><text>{{index + 1}}</text><view><text>{{item.question}}</text><text>累计复习 {{item.review_count}} 次</text></view><text>{{expandedUnitId === item.id ? '⌃' : '⌄'}}</text></view>
+          <view wx:if="{{expandedUnitId === item.id}}" class="knowledge-unit__body"><text>{{item.answer}}</text><view wx:if="{{item.evidence.length}}" class="knowledge-evidence">“{{item.evidence[0].quote}}”</view><view class="knowledge-actions"><button data-id="{{item.id}}" bindtap="editKnowledgeUnit">编辑问答</button><button data-id="{{item.id}}" bindtap="deleteKnowledgeUnit">删除知识点</button></view></view>
+        </view>
+      </view>
+      <button class="knowledge-delete" bindtap="deleteKnowledgeSet">删除整个知识集</button>
+    </block>
+    <block wx:else>
+      <view class="knowledge-list-heading"><view><text>KNOWLEDGE LIBRARY</text><text>知识集</text><text>每次确认整理结果后，这批知识会作为一个整体保存在这里。</text></view><text>{{knowledgeSets.length}} 组</text></view>
+      <view wx:if="{{!knowledgeSets.length}}" class="ios-card knowledge-empty"><text>还没有知识</text><text>整理一段内容并确认后，会出现在这里。</text><button class="ios-button" bindtap="goToCapture">去整理内容</button></view>
+      <view wx:else class="knowledge-set-list"><view wx:for="{{knowledgeSets}}" wx:key="id" class="ios-card knowledge-set-card" data-id="{{item.id}}" bindtap="openKnowledgeSet"><view><text>{{item.created_label}}</text><text>{{item.title}}</text><text>{{item.unit_count}} 个知识点 · 累计复习 {{item.review_count}} 次</text><text>最近复习：{{item.last_reviewed_label}}</text><text>来源：{{item.source_label}}</text></view><text>›</text></view></view>
+    </block>
+  </block>
 </view>

@@ -361,6 +361,7 @@ class KnowledgeDraft(Base):
     )
     version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     status: Mapped[str] = mapped_column(String(32), default="draft", nullable=False)
+    title: Mapped[str | None] = mapped_column(String(300))
     learning_goal: Mapped[str] = mapped_column(String(500), nullable=False)
     agent_summary: Mapped[dict[str, Any]] = mapped_column(JSON_TYPE, default=dict)
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -379,6 +380,7 @@ class DraftUnit(Base):
     __tablename__ = "draft_units"
     __table_args__ = (
         UniqueConstraint("draft_id", "position", name="uq_draft_unit_position"),
+        Index("ix_draft_units_draft_status", "draft_id", "status"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -386,6 +388,7 @@ class DraftUnit(Base):
         Uuid(as_uuid=True), ForeignKey("knowledge_drafts.id", ondelete="CASCADE"), index=True
     )
     position: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), default="active", nullable=False)
     title: Mapped[str] = mapped_column(String(300), nullable=False)
     learning_objective: Mapped[str] = mapped_column(Text, nullable=False)
     explanation: Mapped[str] = mapped_column(Text, nullable=False)

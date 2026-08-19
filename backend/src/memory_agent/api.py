@@ -29,6 +29,14 @@ from memory_agent.models import (
     Source,
     TERMINAL_RUN_STATES,
 )
+from memory_agent.knowledge import (
+    archive_knowledge_set,
+    archive_knowledge_unit,
+    get_knowledge_set,
+    list_knowledge_sets,
+    rename_knowledge_set,
+    update_knowledge_unit,
+)
 from memory_agent.runtime import get_job_runner
 from memory_agent.review import (
     get_reminder_preference,
@@ -54,6 +62,10 @@ from memory_agent.schemas import (
     HealthRead,
     MemoryCandidateRead,
     MemoryDecision,
+    KnowledgeSetDetailRead,
+    KnowledgeSetSummaryRead,
+    KnowledgeSetUpdate,
+    KnowledgeUnitUpdate,
     ReminderPreferenceRead,
     ReminderPreferenceUpdate,
     ReminderSubscriptionGrantCreate,
@@ -225,14 +237,109 @@ def ready(session: Session = Depends(get_session)) -> dict[str, str]:
 @router.get("/review/queue", response_model=list[ReviewCardRead])
 def get_review_queue(
     limit: int = Query(default=20, ge=1, le=100),
+    knowledge_set_id: UUID | None = Query(default=None),
     session: Session = Depends(get_session),
     identity: IdentityContext = Depends(get_current_identity),
 ) -> list[ReviewCardRead]:
     user, _ = _identity(identity)
     return [
         ReviewCardRead.model_validate(item)
-        for item in list_due_review_cards(session, user_id=user.id, limit=limit)
+        for item in list_due_review_cards(
+            session,
+            user_id=user.id,
+            limit=limit,
+            knowledge_set_id=knowledge_set_id,
+        )
     ]
+
+
+@router.get("/knowledge-sets", response_model=list[KnowledgeSetSummaryRead])
+def get_knowledge_sets(
+    session: Session = Depends(get_session),
+    identity: IdentityContext = Depends(get_current_identity),
+) -> list[KnowledgeSetSummaryRead]:
+    user, _ = _identity(identity)
+    return [KnowledgeSetSummaryRead.model_validate(item) for item in list_knowledge_sets(session, user_id=user.id)]
+
+
+@router.get("/knowledge-sets/{knowledge_set_id}", response_model=KnowledgeSetDetailRead)
+def get_knowledge_set_route(
+    knowledge_set_id: UUID,
+    session: Session = Depends(get_session),
+    identity: IdentityContext = Depends(get_current_identity),
+) -> KnowledgeSetDetailRead:
+    user, _ = _identity(identity)
+    try:
+        result = get_knowledge_set(session, knowledge_set_id=knowledge_set_id, user_id=user.id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return KnowledgeSetDetailRead.model_validate(result)
+
+
+@router.patch("/knowledge-sets/{knowledge_set_id}", response_model=KnowledgeSetDetailRead)
+def patch_knowledge_set(
+    knowledge_set_id: UUID,
+    payload: KnowledgeSetUpdate,
+    session: Session = Depends(get_session),
+    identity: IdentityContext = Depends(get_current_identity),
+) -> KnowledgeSetDetailRead:
+    user, _ = _identity(identity)
+    try:
+        result = rename_knowledge_set(
+            session, knowledge_set_id=knowledge_set_id, user_id=user.id, title=payload.title
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return KnowledgeSetDetailRead.model_validate(result)
+
+
+@router.delete("/knowledge-sets/{knowledge_set_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_knowledge_set(
+    knowledge_set_id: UUID,
+    session: Session = Depends(get_session),
+    identity: IdentityContext = Depends(get_current_identity),
+) -> Response:
+    user, _ = _identity(identity)
+    try:
+        archive_knowledge_set(session, knowledge_set_id=knowledge_set_id, user_id=user.id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.patch("/knowledge-units/{unit_id}", response_model=KnowledgeSetDetailRead)
+def patch_knowledge_unit(
+    unit_id: UUID,
+    payload: KnowledgeUnitUpdate,
+    session: Session = Depends(get_session),
+    identity: IdentityContext = Depends(get_current_identity),
+) -> KnowledgeSetDetailRead:
+    user, _ = _identity(identity)
+    try:
+        result = update_knowledge_unit(
+            session,
+            unit_id=unit_id,
+            user_id=user.id,
+            question=payload.question,
+            answer=payload.answer,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return KnowledgeSetDetailRead.model_validate(result)
+
+
+@router.delete("/knowledge-units/{unit_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_knowledge_unit(
+    unit_id: UUID,
+    session: Session = Depends(get_session),
+    identity: IdentityContext = Depends(get_current_identity),
+) -> Response:
+    user, _ = _identity(identity)
+    try:
+        archive_knowledge_unit(session, unit_id=unit_id, user_id=user.id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/review/overview", response_model=ReviewOverviewRead)

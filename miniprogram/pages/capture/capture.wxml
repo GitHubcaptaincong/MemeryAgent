@@ -119,7 +119,7 @@
                   disabled="{{busy}}"
                   bindtap="confirmDraft"
                 >确认并加入复习</button>
-                <view wx:elif="{{item.draft.status === 'confirmed'}}" class="confirmed-result">✓ 已加入复习队列</view>
+                <view wx:elif="{{item.draft.status === 'confirmed'}}" class="confirmed-result"><text>✓ 已加入知识库 · {{item.draft.units.length}} 个知识点</text><button data-id="{{item.draft.id}}" bindtap="viewKnowledgeSet">查看知识集 ›</button></view>
               </view>
             </view>
           </view>

@@ -81,4 +81,10 @@ module.exports = {
   put(path, data, options = {}) {
     return request(path, { ...options, method: 'PUT', data })
   },
+  patch(path, data, options = {}) {
+    return request(path, { ...options, method: 'PATCH', data })
+  },
+  delete(path, options = {}) {
+    return request(path, { ...options, method: 'DELETE' })
+  },
 }

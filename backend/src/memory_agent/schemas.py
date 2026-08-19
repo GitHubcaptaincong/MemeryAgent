@@ -96,6 +96,7 @@ class EvidenceRead(ApiModel):
 class DraftUnitRead(ApiModel):
     id: UUID
     position: int
+    status: str = "active"
     title: str
     learning_objective: str
     explanation: str
@@ -117,11 +118,58 @@ class DraftRead(ApiModel):
     run_id: UUID
     version: int
     status: str
+    title: str | None = None
     learning_goal: str
     agent_summary: dict[str, Any]
     confirmed_at: datetime | None
     created_at: datetime
     units: list[DraftUnitRead]
+
+
+class KnowledgeSetSourceRead(ApiModel):
+    id: UUID
+    title: str
+    origin_type: str
+    origin_url: str | None = None
+    context_type: Literal["url", "conversation", "direct_input"]
+
+
+class KnowledgeSetSummaryRead(ApiModel):
+    id: UUID
+    title: str
+    unit_count: int
+    due_count: int
+    review_count: int
+    last_reviewed_at: datetime | None = None
+    source: KnowledgeSetSourceRead
+    created_at: datetime
+    updated_at: datetime
+
+
+class KnowledgeUnitManageRead(ApiModel):
+    id: UUID
+    position: int
+    title: str
+    question: str
+    answer: str
+    explanation: str
+    evidence: list[EvidenceRead]
+    review_count: int
+    last_reviewed_at: datetime | None = None
+
+
+class KnowledgeSetDetailRead(KnowledgeSetSummaryRead):
+    learning_goal: str
+    units: list[KnowledgeUnitManageRead]
+
+
+class KnowledgeSetUpdate(ApiModel):
+    title: str = Field(min_length=1, max_length=300)
+
+
+class KnowledgeUnitUpdate(ApiModel):
+    question: str = Field(min_length=1, max_length=4_000)
+    answer: str = Field(min_length=1, max_length=8_000)
 
 
 class ConversationRead(ApiModel):

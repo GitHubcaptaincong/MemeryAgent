@@ -49,6 +49,12 @@ const reviewRatingKey = ref(null)
 const reviewRatingValue = ref(null)
 const reviewRatingAcknowledged = ref(false)
 const reviewQueueMode = ref('today')
+const reviewSection = ref('practice')
+const activeKnowledgeSetId = ref('')
+const knowledgeSets = ref([])
+const knowledgeDetail = ref(null)
+const knowledgeBusy = ref(false)
+const expandedKnowledgeUnitId = ref('')
 const dailyPlan = ref(null)
 const insights = ref(null)
 const evaluationPollCount = ref(0)
@@ -163,6 +169,7 @@ const signalAge = computed(() => {
 const dueCount = computed(() => reviewOverview.value.due_count ?? reviewQueue.value.length)
 const plannedCardIds = computed(() => new Set((dailyPlan.value?.planned_cards || []).map((card) => card.id)))
 const visibleReviewQueue = computed(() => {
+  if (activeKnowledgeSetId.value) return reviewQueue.value
   if (reviewQueueMode.value === 'all' || !dailyPlan.value) return reviewQueue.value
   return reviewQueue.value.filter((card) => plannedCardIds.value.has(card.id))
 })
@@ -188,6 +195,7 @@ async function api(path, options = {}) {
         : (detail?.message || `请求失败（${response.status}）`),
     )
   }
+  if (response.status === 204) return null
   return response.json()
 }
 
@@ -595,6 +603,7 @@ async function confirmDraft() {
     await refreshActiveConversation()
     memoryCandidates.value = await api('/api/v1/memory-candidates?status=pending')
     await loadReviewData()
+    await loadKnowledgeSets()
   } catch (reason) {
     error.value = reason.message
   } finally {
@@ -612,7 +621,10 @@ async function showView(view) {
 }
 
 async function loadReviewQueue() {
-  reviewQueue.value = await api('/api/v1/review/queue?limit=50')
+  const setQuery = activeKnowledgeSetId.value
+    ? `&knowledge_set_id=${encodeURIComponent(activeKnowledgeSetId.value)}`
+    : ''
+  reviewQueue.value = await api(`/api/v1/review/queue?limit=50${setQuery}`)
   if (!activeReviewCard.value || !reviewQueue.value.some((item) => item.id === activeReviewCard.value.id)) {
     selectReviewCard(reviewQueue.value[0] || null)
   }
@@ -639,6 +651,101 @@ async function loadReviewData() {
   if (!activeReviewCard.value || !visibleReviewQueue.value.some((item) => item.id === activeReviewCard.value.id)) {
     selectReviewCard(visibleReviewQueue.value[0] || null)
   }
+}
+
+async function loadKnowledgeSets() {
+  knowledgeSets.value = await api('/api/v1/knowledge-sets')
+}
+
+async function showKnowledgeSets() {
+  reviewSection.value = 'knowledge'
+  activeKnowledgeSetId.value = ''
+  knowledgeDetail.value = null
+  knowledgeBusy.value = true
+  reviewError.value = ''
+  try { await loadKnowledgeSets() } catch (reason) { reviewError.value = reason.message } finally { knowledgeBusy.value = false }
+}
+
+async function showPracticeReview() {
+  reviewSection.value = 'practice'
+  if (activeKnowledgeSetId.value) {
+    activeKnowledgeSetId.value = ''
+    await loadReviewQueue().catch((reason) => { reviewError.value = reason.message })
+  }
+}
+
+async function openKnowledgeSet(id) {
+  activeView.value = 'review'
+  reviewSection.value = 'knowledge'
+  knowledgeBusy.value = true
+  reviewError.value = ''
+  try {
+    knowledgeDetail.value = await api(`/api/v1/knowledge-sets/${id}`)
+    expandedKnowledgeUnitId.value = ''
+  } catch (reason) { reviewError.value = reason.message } finally { knowledgeBusy.value = false }
+}
+
+async function renameKnowledgeSet() {
+  if (!knowledgeDetail.value) return
+  const title = window.prompt('知识集标题', knowledgeDetail.value.title)
+  if (!title?.trim()) return
+  try {
+    knowledgeDetail.value = await api(`/api/v1/knowledge-sets/${knowledgeDetail.value.id}`, {
+      method: 'PATCH', body: JSON.stringify({ title: title.trim() }),
+    })
+    await loadKnowledgeSets()
+  } catch (reason) { reviewError.value = reason.message }
+}
+
+async function editKnowledgeUnit(unit) {
+  const question = window.prompt('复习问题', unit.question)
+  if (!question?.trim()) return
+  const answer = window.prompt('答案要点（每行一条）', unit.answer)
+  if (!answer?.trim()) return
+  try {
+    knowledgeDetail.value = await api(`/api/v1/knowledge-units/${unit.id}`, {
+      method: 'PATCH', body: JSON.stringify({ question: question.trim(), answer: answer.trim() }),
+    })
+    await loadKnowledgeSets()
+  } catch (reason) { reviewError.value = reason.message }
+}
+
+async function deleteKnowledgeUnit(unit) {
+  if (!window.confirm(`删除“${unit.title}”这个知识点？\n\n删除后，它将不再出现在后续复习中。`)) return
+  try {
+    await api(`/api/v1/knowledge-units/${unit.id}`, { method: 'DELETE' })
+    const remaining = knowledgeDetail.value.unit_count - 1
+    if (remaining <= 0) {
+      knowledgeDetail.value = null
+      await loadKnowledgeSets()
+    } else {
+      await openKnowledgeSet(knowledgeDetail.value.id)
+      await loadKnowledgeSets()
+    }
+  } catch (reason) { reviewError.value = reason.message }
+}
+
+async function deleteKnowledgeSet() {
+  const current = knowledgeDetail.value
+  if (!current || !window.confirm(`删除知识集“${current.title}”？\n\n删除后，其中 ${current.unit_count} 个知识点将不再参与复习。`)) return
+  try {
+    await api(`/api/v1/knowledge-sets/${current.id}`, { method: 'DELETE' })
+    knowledgeDetail.value = null
+    await Promise.all([loadKnowledgeSets(), loadReviewData()])
+  } catch (reason) { reviewError.value = reason.message }
+}
+
+async function startKnowledgeSetReview() {
+  if (!knowledgeDetail.value?.due_count) return
+  activeKnowledgeSetId.value = knowledgeDetail.value.id
+  reviewSection.value = 'practice'
+  reviewQueueMode.value = 'all'
+  await loadReviewQueue().catch((reason) => { reviewError.value = reason.message })
+}
+
+function knowledgeDate(value) {
+  if (!value) return '暂无'
+  return new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: 'short', day: 'numeric' }).format(new Date(value))
 }
 
 function selectReviewCard(card) {
@@ -716,7 +823,11 @@ function stopEvaluationPolling() {
   evaluationTimer = null
 }
 
-function switchReviewQueue(mode) {
+async function switchReviewQueue(mode) {
+  if (activeKnowledgeSetId.value) {
+    activeKnowledgeSetId.value = ''
+    await loadReviewQueue().catch((reason) => { reviewError.value = reason.message })
+  }
   reviewQueueMode.value = mode
   if (!activeReviewCard.value || !visibleReviewQueue.value.some((item) => item.id === activeReviewCard.value.id)) {
     selectReviewCard(visibleReviewQueue.value[0] || null)
@@ -1014,7 +1125,7 @@ onMounted(() => {
                     <div v-if="expandedResultId === turn.draft.id" class="result-details">
                       <article v-for="unit in turn.draft.units" :key="unit.id"><strong>{{ unit.position }}. {{ unit.title }}</strong><p>{{ unit.explanation }}</p><div><small>复习问题</small><b>{{ unit.question }}</b></div><blockquote v-if="unit.evidence[0]">“{{ unit.evidence[0].quote }}”</blockquote></article>
                       <button v-if="turn.draft.id === draft?.id && turn.draft.status !== 'confirmed'" class="confirm" :disabled="busy" @click="confirmDraft">确认并加入复习</button>
-                      <p v-else-if="turn.draft.status === 'confirmed'" class="confirmed">✓ 已加入复习队列</p>
+                      <div v-else-if="turn.draft.status === 'confirmed'" class="confirmed knowledge-confirmed"><p>✓ 已加入知识库 · {{ turn.draft.units.length }} 个知识点</p><button type="button" @click="openKnowledgeSet(turn.draft.id)">查看知识集 →</button></div>
                     </div>
                   </section>
                 </div>
@@ -1052,6 +1163,11 @@ onMounted(() => {
       </section>
 
       <section v-if="activeView === 'review'" class="review-page">
+        <nav class="review-section-tabs" aria-label="复习与知识管理">
+          <button :class="{ active: reviewSection === 'practice' }" @click="showPracticeReview">复习</button>
+          <button :class="{ active: reviewSection === 'knowledge' }" @click="showKnowledgeSets">知识集</button>
+        </nav>
+        <template v-if="reviewSection === 'practice'">
         <header class="page-intro">
           <div>
             <p class="eyebrow">ACTIVE RECALL</p>
@@ -1074,7 +1190,7 @@ onMounted(() => {
           <span>{{ dailyPlan.balance_status === 'overloaded' ? '已平衡' : '负载合适' }}</span>
         </section>
 
-        <div class="queue-mode" role="tablist" aria-label="复习队列范围">
+        <div v-if="!activeKnowledgeSetId" class="queue-mode" role="tablist" aria-label="复习队列范围">
           <button :class="{ active: reviewQueueMode === 'today' }" @click="switchReviewQueue('today')">今日计划 <b>{{ todayCount }}</b></button>
           <button :class="{ active: reviewQueueMode === 'all' }" @click="switchReviewQueue('all')">全部到期 <b>{{ dueCount }}</b></button>
         </div>
@@ -1185,6 +1301,39 @@ onMounted(() => {
             <div><strong>{{ item.title }}</strong><small>{{ item.source_title }} · {{ formatHistoryRating(item.rating) }}</small></div>
             <span>下次 {{ formatNextDue(item.next_due_at) }}</span>
           </article>
+        </section>
+        </template>
+
+        <section v-else class="knowledge-library">
+          <div v-if="reviewError" class="error">{{ reviewError }}</div>
+          <div v-if="knowledgeBusy" class="knowledge-loading">正在加载知识集…</div>
+          <template v-else-if="knowledgeDetail">
+            <button class="knowledge-back" @click="knowledgeDetail = null">← 返回知识集</button>
+            <header class="knowledge-detail-header">
+              <div><small>KNOWLEDGE SET</small><h1>{{ knowledgeDetail.title }}</h1><p>{{ knowledgeDetail.learning_goal }}</p></div>
+              <button class="secondary" @click="renameKnowledgeSet">编辑标题</button>
+            </header>
+            <div class="knowledge-meta-grid">
+              <article><small>知识点</small><strong>{{ knowledgeDetail.unit_count }}</strong></article>
+              <article><small>累计知识点复习</small><strong>{{ knowledgeDetail.review_count }}</strong></article>
+              <article><small>最近复习</small><strong>{{ knowledgeDate(knowledgeDetail.last_reviewed_at) }}</strong></article>
+              <article><small>创建时间</small><strong>{{ knowledgeDate(knowledgeDetail.created_at) }}</strong></article>
+            </div>
+            <div class="knowledge-source"><span>来源：{{ knowledgeDetail.source.context_type === 'url' ? knowledgeDetail.source.title : (knowledgeDetail.source.context_type === 'conversation' ? '对话整理' : '直接输入') }}</span><a v-if="knowledgeDetail.source.origin_url" :href="knowledgeDetail.source.origin_url" target="_blank" rel="noopener">查看原文 ↗</a></div>
+            <button class="primary knowledge-start" :disabled="!knowledgeDetail.due_count" @click="startKnowledgeSetReview"><span>{{ knowledgeDetail.due_count ? `开始复习（${knowledgeDetail.due_count} 个到期）` : '当前没有到期知识' }}</span><b>→</b></button>
+            <div class="knowledge-unit-list">
+              <article v-for="unit in knowledgeDetail.units" :key="unit.id" class="knowledge-unit">
+                <button class="knowledge-unit-main" @click="expandedKnowledgeUnitId = expandedKnowledgeUnitId === unit.id ? '' : unit.id"><span>{{ String(unit.position).padStart(2, '0') }}</span><div><strong>{{ unit.question }}</strong><small>累计复习 {{ unit.review_count }} 次</small></div><b>{{ expandedKnowledgeUnitId === unit.id ? '⌃' : '⌄' }}</b></button>
+                <div v-if="expandedKnowledgeUnitId === unit.id" class="knowledge-unit-body"><p>{{ unit.answer }}</p><blockquote v-if="unit.evidence?.[0]">“{{ unit.evidence[0].quote }}”</blockquote><div><button @click="editKnowledgeUnit(unit)">编辑问答</button><button class="danger-text" @click="deleteKnowledgeUnit(unit)">删除知识点</button></div></div>
+              </article>
+            </div>
+            <button class="danger-zone" @click="deleteKnowledgeSet">删除整个知识集</button>
+          </template>
+          <template v-else>
+            <header class="knowledge-list-header"><div><small>KNOWLEDGE LIBRARY</small><h1>知识集</h1><p>每次确认整理结果后，这批知识会作为一个整体保存在这里。</p></div><strong>{{ knowledgeSets.length }} 组</strong></header>
+            <div v-if="!knowledgeSets.length" class="knowledge-empty"><h2>还没有知识</h2><p>整理一段内容并确认后，会出现在这里。</p><button @click="showView('organize')">去整理内容 →</button></div>
+            <div v-else class="knowledge-set-grid"><button v-for="item in knowledgeSets" :key="item.id" class="knowledge-set-card" @click="openKnowledgeSet(item.id)"><div><small>{{ knowledgeDate(item.created_at) }}</small><h2>{{ item.title }}</h2><p>{{ item.unit_count }} 个知识点 · 累计复习 {{ item.review_count }} 次</p><span v-if="item.last_reviewed_at">最近复习：{{ knowledgeDate(item.last_reviewed_at) }}</span><span v-else>尚未复习</span><em>{{ item.source.context_type === 'url' ? `来源：${item.source.title}` : (item.source.context_type === 'conversation' ? '来源：对话整理' : '来源：直接输入') }}</em></div><b>→</b></button></div>
+          </template>
         </section>
       </section>
 

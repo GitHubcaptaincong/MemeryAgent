@@ -530,6 +530,10 @@
   line-height: 1.5;
 }
 
+.confirmed-result text { display: block; }
+.confirmed-result button { margin-top: 12rpx; padding: 0; border: 0; background: transparent; color: #007aff; font-size: 23rpx; font-weight: 650; line-height: 1.5; }
+.confirmed-result button::after { border: 0; }
+
 .app-bar-safe-area {
   width: 100%;
   height: 72rpx;

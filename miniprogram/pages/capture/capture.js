@@ -673,10 +673,17 @@ Page({
       await this.pollRun()
       await this.refreshActiveConversation()
       await this.loadMemoryCandidates()
-      wx.showToast({ title: '已加入复习', icon: 'success' })
+      wx.showToast({ title: '已加入知识库', icon: 'success' })
     } catch (error) {
       this.setData({ busy: false, error: friendlyError(error) })
     }
+  },
+
+  viewKnowledgeSet(event) {
+    const id = event.currentTarget.dataset.id
+    if (!id) return
+    wx.setStorageSync('memoryAgentKnowledgeSetId', id)
+    wx.switchTab({ url: '/pages/review/review' })
   },
 
   async loadMemoryCandidates() {

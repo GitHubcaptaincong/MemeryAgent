@@ -45,6 +45,24 @@ function historyFor(items) {
   return (items || []).map((item) => ({ ...item, next_due_label: nextDueLabel(item.next_due_at) }))
 }
 
+function dateLabel(value) {
+  if (!value) return '暂无'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '暂无'
+  return `${date.getFullYear()} 年 ${date.getMonth() + 1} 月 ${date.getDate()} 日`
+}
+
+function decorateKnowledgeSet(item) {
+  return {
+    ...item,
+    created_label: dateLabel(item.created_at),
+    last_reviewed_label: item.last_reviewed_at ? dateLabel(item.last_reviewed_at) : '尚未复习',
+    source_label: item.source && item.source.context_type === 'url'
+      ? item.source.title
+      : (item.source && item.source.context_type === 'conversation' ? '对话整理' : '直接输入'),
+  }
+}
+
 function decorateDailyPlan(plan) {
   const value = plan || {}
   const completed = Number(value.completed_today || 0)
@@ -89,12 +107,23 @@ Page({
     planAvailable: true,
     evaluationWaitingLong: false,
     ratings: ratingsFor(null),
+    section: 'practice',
+    activeKnowledgeSetId: '',
+    knowledgeSets: [],
+    knowledgeDetail: null,
+    expandedUnitId: '',
   },
 
   onShow() {
     const tabBar = typeof this.getTabBar === 'function' && this.getTabBar()
     if (tabBar) tabBar.setData({ selected: 1 })
-    this.loadReviewData()
+    const knowledgeSetId = wx.getStorageSync('memoryAgentKnowledgeSetId')
+    if (knowledgeSetId) {
+      wx.removeStorageSync('memoryAgentKnowledgeSetId')
+      this.openKnowledgeSetById(knowledgeSetId)
+    } else {
+      this.loadReviewData()
+    }
   },
 
   onPullDownRefresh() {
@@ -112,8 +141,11 @@ Page({
   async loadReviewData() {
     this.setData({ loading: true, error: '' })
     try {
+      const setQuery = this.data.activeKnowledgeSetId
+        ? `&knowledge_set_id=${encodeURIComponent(this.data.activeKnowledgeSetId)}`
+        : ''
       const [allQueue, overview, history, planResult] = await Promise.all([
-        api.get('/review/queue?limit=100'),
+        api.get(`/review/queue?limit=100${setQuery}`),
         api.get('/review/overview'),
         api.get('/review/history?limit=10'),
         api.get('/review/daily-plan')
@@ -122,7 +154,7 @@ Page({
       ])
       const planAvailable = !planResult.error
       const dailyPlan = decorateDailyPlan(planAvailable ? planResult.value : null)
-      const queue = this.data.showAllDue || !planAvailable
+      const queue = this.data.activeKnowledgeSetId || this.data.showAllDue || !planAvailable
         ? allQueue
         : plannedQueueFor(allQueue, dailyPlan)
       const previousCardId = this.data.activeCard && this.data.activeCard.id
@@ -257,6 +289,127 @@ Page({
     wx.navigateTo({ url: '/pages/insights/insights' })
   },
 
+  async showPractice() {
+    this.setData({ section: 'practice', activeKnowledgeSetId: '', showAllDue: false })
+    await this.loadReviewData()
+  },
+
+  async showKnowledgeSets() {
+    this.setData({ section: 'knowledge', activeKnowledgeSetId: '', knowledgeDetail: null, loading: true, error: '' })
+    try {
+      const items = await api.get('/knowledge-sets')
+      this.setData({ knowledgeSets: items.map(decorateKnowledgeSet), loading: false })
+    } catch (error) {
+      this.setData({ loading: false, error: error.message })
+    }
+  },
+
+  openKnowledgeSet(event) {
+    this.openKnowledgeSetById(event.currentTarget.dataset.id)
+  },
+
+  async openKnowledgeSetById(id) {
+    this.setData({ section: 'knowledge', loading: true, error: '' })
+    try {
+      const item = await api.get(`/knowledge-sets/${id}`)
+      this.setData({
+        knowledgeDetail: {
+          ...decorateKnowledgeSet(item),
+          units: item.units.map((unit) => ({ ...unit, last_reviewed_label: unit.last_reviewed_at ? dateLabel(unit.last_reviewed_at) : '尚未复习' })),
+        },
+        expandedUnitId: '',
+        loading: false,
+      })
+    } catch (error) {
+      this.setData({ loading: false, error: error.message })
+    }
+  },
+
+  backToKnowledgeSets() {
+    this.showKnowledgeSets()
+  },
+
+  toggleKnowledgeUnit(event) {
+    const id = event.currentTarget.dataset.id
+    this.setData({ expandedUnitId: this.data.expandedUnitId === id ? '' : id })
+  },
+
+  promptValue(title, content) {
+    return new Promise((resolve) => {
+      wx.showModal({ title, content, editable: true, placeholderText: title, success: (result) => resolve(result.confirm ? result.content : null), fail: () => resolve(null) })
+    })
+  },
+
+  async renameKnowledgeSet() {
+    const current = this.data.knowledgeDetail
+    if (!current) return
+    const title = await this.promptValue('编辑知识集标题', current.title)
+    if (!title || !title.trim()) return
+    try {
+      await api.patch(`/knowledge-sets/${current.id}`, { title: title.trim() })
+      await this.openKnowledgeSetById(current.id)
+    } catch (error) { this.setData({ error: error.message }) }
+  },
+
+  async editKnowledgeUnit(event) {
+    const id = event.currentTarget.dataset.id
+    const unit = this.data.knowledgeDetail.units.find((item) => item.id === id)
+    if (!unit) return
+    const question = await this.promptValue('编辑复习问题', unit.question)
+    if (!question || !question.trim()) return
+    const answer = await this.promptValue('编辑答案要点', unit.answer)
+    if (!answer || !answer.trim()) return
+    try {
+      await api.patch(`/knowledge-units/${id}`, { question: question.trim(), answer: answer.trim() })
+      await this.openKnowledgeSetById(this.data.knowledgeDetail.id)
+    } catch (error) { this.setData({ error: error.message }) }
+  },
+
+  deleteKnowledgeUnit(event) {
+    const id = event.currentTarget.dataset.id
+    const unit = this.data.knowledgeDetail.units.find((item) => item.id === id)
+    if (!unit) return
+    wx.showModal({
+      title: '删除这个知识点？',
+      content: '删除后，该知识点将不再出现在后续复习中。',
+      confirmColor: '#d70015',
+      success: async (result) => {
+        if (!result.confirm) return
+        try {
+          await api.delete(`/knowledge-units/${id}`)
+          if (this.data.knowledgeDetail.unit_count <= 1) await this.showKnowledgeSets()
+          else await this.openKnowledgeSetById(this.data.knowledgeDetail.id)
+        } catch (error) { this.setData({ error: error.message }) }
+      },
+    })
+  },
+
+  deleteKnowledgeSet() {
+    const current = this.data.knowledgeDetail
+    if (!current) return
+    wx.showModal({
+      title: '删除知识集？',
+      content: `删除后，其中 ${current.unit_count} 个知识点将不再参与复习。`,
+      confirmColor: '#d70015',
+      success: async (result) => {
+        if (!result.confirm) return
+        try { await api.delete(`/knowledge-sets/${current.id}`); await this.showKnowledgeSets() } catch (error) { this.setData({ error: error.message }) }
+      },
+    })
+  },
+
+  async startKnowledgeSetReview() {
+    const current = this.data.knowledgeDetail
+    if (!current || !current.due_count) return
+    this.setData({ section: 'practice', activeKnowledgeSetId: current.id, showAllDue: true })
+    await this.loadReviewData()
+  },
+
+  copySourceUrl() {
+    const url = this.data.knowledgeDetail && this.data.knowledgeDetail.source.origin_url
+    if (url) wx.setClipboardData({ data: url, success: () => wx.showToast({ title: '链接已复制', icon: 'none' }) })
+  },
+
   showAllDueCards() {
     if (this.data.showAllDue) return
     const queue = this.data.allQueue
@@ -276,6 +429,11 @@ Page({
   },
 
   showTodayPlan() {
+    if (this.data.activeKnowledgeSetId) {
+      this.setData({ activeKnowledgeSetId: '', showAllDue: false })
+      this.loadReviewData()
+      return
+    }
     if (!this.data.showAllDue) return
     const queue = plannedQueueFor(this.data.allQueue, this.data.dailyPlan)
     const activeCard = queue[0] || null

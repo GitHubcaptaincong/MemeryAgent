@@ -214,7 +214,12 @@ def _load_active_card_bundles(session: Session, *, user_id: UUID) -> list[_CardB
         .join(DraftUnit, ReviewCard.draft_unit_id == DraftUnit.id)
         .join(KnowledgeDraft, DraftUnit.draft_id == KnowledgeDraft.id)
         .join(Source, KnowledgeDraft.source_id == Source.id)
-        .where(ReviewCard.user_id == user_id, ReviewCard.status == "active")
+        .where(
+            ReviewCard.user_id == user_id,
+            ReviewCard.status == "active",
+            DraftUnit.status == "active",
+            KnowledgeDraft.status == "confirmed",
+        )
         .order_by(ReviewCard.due_at, ReviewCard.id)
     ).all()
     return [_CardBundle(card, unit, draft, source) for card, unit, draft, source in rows]
