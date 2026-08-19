@@ -132,7 +132,10 @@
         <view class="assistant-content">
           <view class="inline-processing" bindtap="toggleTaskList"><view class="processing-dot"></view><text>{{currentActivity || '正在整理…'}}</text><text>{{tasksExpanded ? '⌃' : '⌄'}}</text></view>
           <view wx:if="{{tasksExpanded}}" class="processing-details">
-            <view class="processing-progress"><view style="width: {{progress}}%;"></view></view>
+            <text wx:if="{{finalizing}}" class="processing-status-detail">{{currentActivity}} 已处理 {{finalizingElapsedText}}</text>
+            <view wx:if="{{processingFacts.length}}" class="processing-facts">
+              <text wx:for="{{processingFacts}}" wx:key="*this">✓ {{item}}</text>
+            </view>
             <scroll-view wx:if="{{events.length}}" scroll-y enhanced class="processing-events">
               <view wx:for="{{events}}" wx:key="id" class="processing-event"><text>{{item.label}}</text><text>{{item.clock}}</text></view>
             </scroll-view>

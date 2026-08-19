@@ -10,6 +10,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from memory_agent.config import Settings
+from memory_agent.draft_contract import canonical_draft_hash
 from memory_agent.events import append_event, transition_run
 from memory_agent.memory import retrieve_memories
 from memory_agent.model_adapters import AgentModelContext, ModelAdapter, ModelProviderError
@@ -24,6 +25,7 @@ from memory_agent.models import (
     RunState,
     Source,
     TERMINAL_RUN_STATES,
+    ToolInvocation,
 )
 from memory_agent.skills import SkillRegistry
 from memory_agent.tools import ToolContext, ToolRegistry
@@ -281,33 +283,12 @@ class AgentRuntime:
             if step.kind == "final":
                 if step.final_draft is None:
                     raise RuntimeError("model returned final without a draft")
-                transition_run(session, run, RunState.DRAFTING)
-                draft = self._persist_draft(session, run, source, step.final_draft)
-                append_event(
+                validated_draft = self._validated_draft_payload(
                     session,
                     run,
-                    "draft.created",
-                    {
-                        "draft_id": str(draft.id),
-                        "version": draft.version,
-                        "unit_count": len(draft.units),
-                    },
+                    candidate=step.final_draft,
                 )
-                run.stop_reason = "awaiting_user_confirmation"
-                session.commit()
-                self._create_checkpoint(
-                    session,
-                    run=run,
-                    source=source,
-                    draft=draft,
-                    context=context,
-                )
-                transition_run(
-                    session,
-                    run,
-                    RunState.AWAITING_USER,
-                    details={"draft_id": str(draft.id)},
-                )
+                self._finalize_draft(session, run, source, context, validated_draft)
                 return
 
             if not step.tool_calls:
@@ -328,10 +309,118 @@ class AgentRuntime:
                 context.tool_results.append(
                     {"call_id": call.call_id, "tool": call.name, "result": result}
                 )
+                if call.name == "schema_validate" and result.get("valid"):
+                    validated_draft = self._validated_draft_payload(
+                        session,
+                        run,
+                        arguments=call.arguments,
+                        validation=result,
+                    )
+                    self._finalize_draft(session, run, source, context, validated_draft)
+                    return
                 if call.name == "source_read":
                     transition_run(session, run, RunState.DRAFTING)
         run.stop_reason = "agent_loop_budget_exhausted"
         transition_run(session, run, RunState.BUDGET_EXHAUSTED)
+
+    @staticmethod
+    def _validated_draft_payload(
+        session: Session,
+        run: AgentRun,
+        *,
+        arguments: dict[str, Any] | None = None,
+        validation: dict[str, Any] | None = None,
+        candidate: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        if arguments is None or validation is None:
+            invocation = session.scalar(
+                select(ToolInvocation)
+                .where(
+                    ToolInvocation.run_id == run.id,
+                    ToolInvocation.tool_name == "schema_validate",
+                    ToolInvocation.status == "succeeded",
+                )
+                .order_by(ToolInvocation.created_at.desc())
+                .limit(1)
+            )
+            if invocation is None:
+                raise RuntimeError("cannot finalize without a successful schema validation")
+            arguments = invocation.arguments_json
+            validation = invocation.result_json
+
+        draft = arguments.get("draft") if isinstance(arguments, dict) else None
+        if not isinstance(draft, dict):
+            raise RuntimeError("successful schema validation did not persist a draft")
+        if not isinstance(validation, dict) or not validation.get("valid"):
+            raise RuntimeError("cannot finalize a draft that did not pass schema validation")
+        validated_hash = validation.get("draft_hash")
+        if not isinstance(validated_hash, str) or canonical_draft_hash(draft) != validated_hash:
+            raise RuntimeError("validated draft hash does not match persisted tool arguments")
+        if candidate is not None and canonical_draft_hash(candidate) != validated_hash:
+            raise RuntimeError("final draft differs from the validated draft")
+        return draft
+
+    def _finalize_draft(
+        self,
+        session: Session,
+        run: AgentRun,
+        source: Source,
+        context: AgentModelContext,
+        payload: dict[str, Any],
+    ) -> KnowledgeDraft:
+        draft = session.scalar(
+            select(KnowledgeDraft)
+            .where(KnowledgeDraft.run_id == run.id)
+            .order_by(KnowledgeDraft.version.desc())
+            .limit(1)
+        )
+        if run.state != RunState.DRAFTING.value:
+            transition_run(session, run, RunState.DRAFTING)
+        if draft is None:
+            draft = self._persist_draft(session, run, source, payload)
+
+        draft_created = session.scalar(
+            select(AgentEvent).where(
+                AgentEvent.run_id == run.id,
+                AgentEvent.event_type == "draft.created",
+            )
+        )
+        if draft_created is None:
+            append_event(
+                session,
+                run,
+                "draft.created",
+                {
+                    "draft_id": str(draft.id),
+                    "version": draft.version,
+                    "unit_count": len(draft.units),
+                },
+            )
+        run.stop_reason = "awaiting_user_confirmation"
+        session.commit()
+
+        checkpoint = session.scalar(
+            select(AgentCheckpoint)
+            .where(AgentCheckpoint.run_id == run.id)
+            .order_by(AgentCheckpoint.checkpoint_version.desc())
+            .limit(1)
+        )
+        if checkpoint is None:
+            self._create_checkpoint(
+                session,
+                run=run,
+                source=source,
+                draft=draft,
+                context=context,
+            )
+        if run.state != RunState.AWAITING_USER.value:
+            transition_run(
+                session,
+                run,
+                RunState.AWAITING_USER,
+                details={"draft_id": str(draft.id)},
+            )
+        return draft
 
     @staticmethod
     def _persist_draft(

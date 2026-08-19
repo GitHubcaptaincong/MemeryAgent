@@ -4,6 +4,7 @@ import json
 from types import SimpleNamespace
 from typing import Any
 
+from memory_agent.agent import AgentRuntime
 from memory_agent.cli_proxy_adapter import (
     CLIProxyResponsesAdapter,
     ModelProtocolError,
@@ -127,7 +128,7 @@ def _settings() -> Settings:
     )
 
 
-def test_cli_proxy_runs_read_validate_submit_with_manual_replay() -> None:
+def test_cli_proxy_runs_three_model_calls_then_finalizes_locally() -> None:
     draft = _draft()
     client = RecordingClient(
         [
@@ -142,7 +143,6 @@ def test_cli_proxy_runs_read_validate_submit_with_manual_replay() -> None:
                 {"quotes": [draft["units"][0]["evidence"][0]["quote"]]},
             ),
             _response("call-validate", "schema_validate", {"draft": draft}),
-            _response("call-submit", "submit_draft", {"draft": draft}),
         ]
     )
     adapter = CLIProxyResponsesAdapter(_settings(), client=client)
@@ -193,14 +193,15 @@ def test_cli_proxy_runs_read_validate_submit_with_manual_replay() -> None:
     final = adapter.next_step(context)
     assert final.kind == "final"
     assert final.final_draft == draft
-    assert len(context.scratch["provider_items"]) == 11
+    assert len(client.requests) == 3
+    assert len(context.scratch["provider_items"]) == 9
 
 
-def test_submit_must_match_the_validated_draft() -> None:
+def test_cached_draft_must_match_the_validated_draft() -> None:
     draft = _draft()
     changed = _draft()
     changed["units"][0]["title"] = "未经重新校验的标题"
-    client = RecordingClient([_response("call-submit", "submit_draft", {"draft": changed})])
+    client = RecordingClient([])
     adapter = CLIProxyResponsesAdapter(_settings(), client=client)
     context = _context()
     context.tool_results.extend(
@@ -217,12 +218,63 @@ def test_submit_must_match_the_validated_draft() -> None:
             },
         ]
     )
+    context.scratch["validated_draft"] = changed
     try:
         adapter.next_step(context)
     except ModelProtocolError as exc:
-        assert "differs from the validated draft" in str(exc)
+        assert "cached draft differs from the validated draft" in str(exc)
     else:
         raise AssertionError("changed draft should have been rejected")
+
+
+def test_runtime_rejects_persisted_validation_hash_mismatch() -> None:
+    draft = _draft()
+    try:
+        AgentRuntime._validated_draft_payload(
+            None,
+            SimpleNamespace(id="run-hash-test"),
+            arguments={"draft": draft},
+            validation={"valid": True, "errors": [], "draft_hash": "invalid"},
+        )
+    except RuntimeError as exc:
+        assert "hash does not match" in str(exc)
+    else:
+        raise AssertionError("persisted schema arguments must match their validation hash")
+
+
+def test_invalid_schema_result_stays_in_correction_flow() -> None:
+    corrected = _draft()
+    client = RecordingClient(
+        [_response("call-corrected-validate", "schema_validate", {"draft": corrected})]
+    )
+    adapter = CLIProxyResponsesAdapter(_settings(), client=client)
+    context = _context()
+    quote = corrected["units"][0]["evidence"][0]["quote"]
+    context.tool_results.extend(
+        [
+            {"call_id": "read", "tool": "source_read", "result": {"content": SOURCE}},
+            {
+                "call_id": "locate",
+                "tool": "source_locate_quotes",
+                "result": {
+                    "all_resolved": True,
+                    "resolved": [{"quote": quote, "start_char": 0, "end_char": len(quote)}],
+                    "unresolved": [],
+                },
+            },
+            {
+                "call_id": "invalid-validate",
+                "tool": "schema_validate",
+                "result": {"valid": False, "errors": ["draft.units[0].title is required"]},
+            },
+        ]
+    )
+
+    correction = adapter.next_step(context)
+
+    assert correction.kind == "tool_calls"
+    assert correction.tool_calls[0].name == "schema_validate"
+    assert len(client.requests) == 1
 
 
 def test_draft_evidence_must_match_source_exactly() -> None:

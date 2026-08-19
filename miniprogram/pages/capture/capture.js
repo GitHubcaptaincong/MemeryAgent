@@ -4,17 +4,36 @@ const { stateLabel, eventLabel, formatClock } = require('../../utils/format')
 
 const finishedStates = ['awaiting_user', 'completed', 'failed', 'cancelled', 'budget_exhausted']
 const terminalStates = finishedStates.concat('retry_wait')
-const progressByState = {
-  queued: 8,
-  ingesting: 18,
-  retrieving_memory: 30,
-  routing_skills: 42,
-  planning: 54,
-  executing: 66,
-  drafting: 78,
-  reviewing: 90,
-  awaiting_user: 100,
-  completed: 100,
+
+function finalizationStatus(events, now = Date.now()) {
+  const valid = [...events].reverse().find((event) => (
+    event.event_type === 'tool.completed'
+    && event.payload && event.payload.tool === 'schema_validate'
+    && event.payload.result_summary && event.payload.result_summary.valid === true
+  ))
+  const draftCreated = [...events].reverse().find((event) => event.event_type === 'draft.created')
+  if (!valid || (draftCreated && draftCreated.seq > valid.seq)) {
+    return { active: false, message: '', elapsedText: '' }
+  }
+  const began = new Date(valid.created_at).getTime()
+  const elapsed = Number.isFinite(began) ? Math.max(0, Math.floor((now - began) / 1000)) : 0
+  const message = elapsed < 8
+    ? '正在完成整理…'
+    : elapsed < 20
+      ? '正在整理知识结构和引用…'
+      : '内容较多，仍在处理中…'
+  return { active: true, message, elapsedText: `${elapsed} 秒` }
+}
+
+function processingFacts(events) {
+  const source = [...events].reverse().find((event) => event.event_type === 'source.loaded')
+  const locate = [...events].reverse().find((event) => event.event_type === 'tool.completed' && event.payload && event.payload.tool === 'source_locate_quotes')
+  const validate = [...events].reverse().find((event) => event.event_type === 'tool.completed' && event.payload && event.payload.tool === 'schema_validate' && event.payload.result_summary && event.payload.result_summary.valid === true)
+  const facts = []
+  if (source && source.payload.char_count) facts.push(`已读取 ${source.payload.char_count} 字材料`)
+  if (locate) facts.push(`已找到 ${locate.payload.result_summary.resolved_count || 0} 条原文依据`)
+  if (validate) facts.push(`已校验 ${validate.payload.result_summary.unit_count || 0} 个知识单元`)
+  return facts
 }
 
 function standaloneUrl(value) {
@@ -100,8 +119,10 @@ Page({
     run: null,
     runStateLabel: '',
     currentActivity: '等待记录',
-    progress: 0,
     elapsedText: '0 秒',
+    finalizing: false,
+    finalizingElapsedText: '',
+    processingFacts: [],
     events: [],
     tasksExpanded: true,
     draft: null,
@@ -291,7 +312,6 @@ Page({
         events: [],
         tasksExpanded: false,
         memoryCandidates: [],
-        progress: latest && terminalStates.includes(latest.run_state) ? 100 : 0,
         currentActivity: latest && latest.assistant_summary ? latest.assistant_summary : '等待继续对话',
       })
       if (latestRunning) {
@@ -327,7 +347,9 @@ Page({
       tasksExpanded: true,
       memoryCandidates: [],
       error: '',
-      progress: 0,
+      finalizing: false,
+      finalizingElapsedText: '',
+      processingFacts: [],
       currentActivity: '等待记录',
       composerPlaceholder: '发消息、粘贴文章或链接…',
     })
@@ -434,8 +456,10 @@ Page({
       tasksExpanded: true,
       error: '',
       currentActivity: '正在识别输入并创建任务',
-      progress: 4,
       elapsedText: '0 秒',
+      finalizing: false,
+      finalizingElapsedText: '',
+      processingFacts: [],
     })
 
     try {
@@ -479,7 +503,6 @@ Page({
         content: '',
         charCount: 0,
         currentActivity: '材料已保存，AI 正在后台整理',
-        progress: 8,
         run: started.run,
         runStateLabel: stateLabel(started.run.state),
       })
@@ -526,14 +549,21 @@ Page({
       if (newEvents.length) this.lastEventSeq = newEvents[newEvents.length - 1].seq
       const elapsedSeconds = Math.max(0, Math.floor((Date.now() - this.startedAt) / 1000))
       const latest = allEvents[allEvents.length - 1]
+      const finalization = finalizationStatus(allEvents)
       this.setData({
         run,
         runStateLabel: stateLabel(run.state),
-        currentActivity: latest ? latest.label : stateLabel(run.state),
-        progress: progressByState[run.state] || this.data.progress,
+        currentActivity: finalization.active ? finalization.message : (latest ? latest.label : stateLabel(run.state)),
         elapsedText: elapsedSeconds < 60 ? `${elapsedSeconds} 秒` : `${Math.floor(elapsedSeconds / 60)} 分 ${elapsedSeconds % 60} 秒`,
+        finalizing: finalization.active,
+        finalizingElapsedText: finalization.elapsedText,
+        processingFacts: processingFacts(allEvents),
         events: allEvents.slice(-50),
       })
+
+      if (newEvents.some((event) => event.event_type === 'draft.created') && !this.data.draft) {
+        await this.loadDraft(runId)
+      }
 
       if (run.state === 'awaiting_user') {
         await this.loadDraft(runId)
@@ -572,10 +602,21 @@ Page({
 
   async loadDraft(runId) {
     const draft = await api.get(`/runs/${runId}/draft`)
+    const conversationTurns = this.data.conversationTurns.map((turn) => (
+      turn.run_id === runId
+        ? decorateTurn({
+            ...turn,
+            assistant_summary: (draft.agent_summary && draft.agent_summary.overview) || turn.assistant_summary,
+            draft,
+          }, this.data.expandedTurnIds)
+        : turn
+    ))
     this.setData({
       draft,
+      conversationTurns,
       expandedUnitId: draft.units.length ? draft.units[0].id : '',
-      progress: 100,
+      finalizing: false,
+      finalizingElapsedText: '',
       currentActivity: `已生成 ${draft.units.length} 个知识单元，等你确认`,
     })
     this.scrollToBottom()

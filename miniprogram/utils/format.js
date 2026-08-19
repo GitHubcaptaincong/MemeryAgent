@@ -24,14 +24,21 @@ function eventLabel(event) {
   const payload = event.payload || {}
   if (payload.message) return payload.message
   if (payload.summary) return payload.summary
+  if (event.event_type === 'source.loaded') return `已读取 ${payload.char_count || 0} 字材料`
+  if (event.event_type === 'tool.completed') {
+    const result = payload.result_summary || {}
+    if (payload.tool === 'source_read') return `材料读取完成，共 ${result.char_count || 0} 字`
+    if (payload.tool === 'source_locate_quotes') return `证据定位完成：${result.resolved_count || 0} 条成功`
+    if (payload.tool === 'schema_validate') return result.valid
+      ? `整理结果校验通过，共 ${result.unit_count || 0} 个知识单元`
+      : `整理结果有 ${result.error_count || 0} 个问题，正在修正`
+  }
   const labels = {
     'run.created': '任务已创建',
-    'source.loaded': '已读取原始材料',
     'memory.retrieved': '已完成相关记忆检索',
     'skills.selected': '已选择处理技能',
     'agent.plan_created': '已制定处理计划',
     'tool.started': '正在调用处理工具',
-    'tool.completed': '工具调用完成',
     'draft.created': '知识草稿已经生成',
     'checkpoint.created': '已保存可恢复进度',
     'run.retryable_error': '模型服务暂时异常',

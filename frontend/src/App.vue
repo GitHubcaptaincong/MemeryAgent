@@ -107,11 +107,43 @@ const groupedConversations = computed(() => {
   return [...groups].map(([label, items]) => ({ label, items }))
 })
 const runFinished = computed(() => ['awaiting_user', 'completed', 'failed', 'cancelled', 'budget_exhausted'].includes(run.value?.state))
-const progress = computed(() => {
-  const states = ['queued', 'ingesting', 'retrieving_memory', 'routing_skills', 'planning', 'executing', 'drafting', 'reviewing', 'awaiting_user']
-  const index = states.indexOf(run.value?.state)
-  if (!run.value && busy.value) return 4
-  return index < 0 ? (run.value?.state === 'completed' ? 100 : 0) : Math.round(((index + 1) / states.length) * 100)
+const validSchemaEvent = computed(() => {
+  for (let index = events.value.length - 1; index >= 0; index -= 1) {
+    const item = events.value[index]
+    if (item.event_type === 'tool.completed' && item.payload?.tool === 'schema_validate' && item.payload?.result_summary?.valid === true) return item
+  }
+  return null
+})
+const latestDraftEvent = computed(() => {
+  for (let index = events.value.length - 1; index >= 0; index -= 1) {
+    if (events.value[index].event_type === 'draft.created') return events.value[index]
+  }
+  return null
+})
+const finalizing = computed(() => Boolean(
+  validSchemaEvent.value
+  && (!latestDraftEvent.value || latestDraftEvent.value.seq < validSchemaEvent.value.seq),
+))
+const finalizingElapsedSeconds = computed(() => {
+  if (!finalizing.value) return 0
+  const began = Date.parse(validSchemaEvent.value?.created_at || '')
+  if (!Number.isFinite(began)) return 0
+  const now = startedAt.value ? startedAt.value + (elapsedSeconds.value * 1000) : Date.now()
+  return Math.max(0, Math.floor((now - began) / 1000))
+})
+const finalizingMessage = computed(() => {
+  if (finalizingElapsedSeconds.value < 8) return '正在完成整理…'
+  if (finalizingElapsedSeconds.value < 20) return '正在整理知识结构和引用…'
+  return '内容较多，仍在处理中…'
+})
+const processingFacts = computed(() => {
+  const facts = []
+  const source = [...events.value].reverse().find((item) => item.event_type === 'source.loaded')
+  const locate = [...events.value].reverse().find((item) => item.event_type === 'tool.completed' && item.payload?.tool === 'source_locate_quotes')
+  if (source?.payload?.char_count) facts.push(`已读取 ${source.payload.char_count} 字材料`)
+  if (locate) facts.push(`已找到 ${locate.payload?.result_summary?.resolved_count || 0} 条原文依据`)
+  if (validSchemaEvent.value) facts.push(`已校验 ${validSchemaEvent.value.payload?.result_summary?.unit_count || 0} 个知识单元`)
+  return facts
 })
 const processingMode = computed(() => {
   const plan = events.value.find((item) => item.event_type === 'agent.plan_created')
@@ -119,6 +151,7 @@ const processingMode = computed(() => {
   return plan?.payload?.processing_mode === 'quick' ? '短内容快速通道' : '完整 Agent 通道'
 })
 const currentActivity = computed(() => {
+  if (finalizing.value) return finalizingMessage.value
   if (livePulse.value?.message) return livePulse.value.message
   const latest = events.value[events.value.length - 1]
   return latest ? eventTitle(latest) : (busy.value ? '请求已收到，正在创建任务' : '等待提交材料')
@@ -534,7 +567,18 @@ async function refreshVisibleEvents() {
 }
 
 async function loadDraft() {
-  if (run.value?.id) draft.value = await api(`/api/v1/runs/${run.value.id}/draft`)
+  if (!run.value?.id) return
+  const loaded = await api(`/api/v1/runs/${run.value.id}/draft`)
+  draft.value = loaded
+  conversationTurns.value = conversationTurns.value.map((turn) => (
+    turn.run_id === run.value.id
+      ? {
+          ...turn,
+          assistant_summary: loaded.agent_summary?.overview || turn.assistant_summary,
+          draft: loaded,
+        }
+      : turn
+  ))
 }
 
 async function confirmDraft() {
@@ -979,7 +1023,12 @@ onMounted(() => {
 
             <article v-if="busy" class="assistant-turn processing-turn"><span class="assistant-avatar">M</span><div>
               <button type="button" class="inline-processing" @click="tasksExpanded = !tasksExpanded"><i></i><span>{{ currentActivity || '正在整理…' }}</span><b>{{ tasksExpanded ? '⌃' : '⌄' }}</b></button>
-              <div v-show="tasksExpanded" class="processing-details"><div class="progress"><i :style="{ width: `${progress}%` }"></i></div><ol v-if="events.length"><li v-for="item in events" :key="item.seq"><span>{{ eventTitle(item) }}</span><small>{{ formatTime(item.created_at) }}</small></li></ol><button type="button" class="stop-run" :disabled="canceling" @click="stopActiveRun">{{ canceling ? '正在停止…' : '停止本次任务' }}</button></div>
+              <div v-show="tasksExpanded" class="processing-details">
+                <p v-if="finalizing" class="processing-status-detail">{{ finalizingMessage }} 已处理 {{ formatElapsed(finalizingElapsedSeconds) }}</p>
+                <ul v-if="processingFacts.length" class="processing-facts"><li v-for="fact in processingFacts" :key="fact">✓ {{ fact }}</li></ul>
+                <ol v-if="events.length"><li v-for="item in events" :key="item.seq"><span>{{ eventTitle(item) }}</span><small>{{ formatTime(item.created_at) }}</small></li></ol>
+                <button type="button" class="stop-run" :disabled="canceling" @click="stopActiveRun">{{ canceling ? '正在停止…' : '停止本次任务' }}</button>
+              </div>
             </div></article>
 
             <article v-for="candidate in memoryCandidates" :key="candidate.id" class="chat-memory-approval">

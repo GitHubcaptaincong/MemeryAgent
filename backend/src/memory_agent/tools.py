@@ -146,7 +146,11 @@ def _result_summary(name: str, result: dict[str, Any]) -> dict[str, Any]:
             "unresolved_count": len(result.get("unresolved", [])),
         }
     if name == "schema_validate":
-        return {"valid": result.get("valid"), "error_count": len(result.get("errors", []))}
+        return {
+            "valid": result.get("valid"),
+            "error_count": len(result.get("errors", [])),
+            "unit_count": result.get("unit_count", 0),
+        }
     return {"keys": sorted(result.keys())}
 
 
@@ -217,6 +221,7 @@ def schema_validate(_context: ToolContext, arguments: dict[str, Any]) -> dict[st
     result: dict[str, Any] = {"valid": not errors, "errors": errors}
     if not errors:
         result["draft_hash"] = canonical_draft_hash(draft)
+        result["unit_count"] = len(draft.get("units", []))
     return result
 
 

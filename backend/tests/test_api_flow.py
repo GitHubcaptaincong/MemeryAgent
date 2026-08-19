@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from uuid import UUID
+
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 
@@ -7,12 +9,15 @@ from memory_agent.database import SessionLocal
 from memory_agent.main import app
 from memory_agent.models import (
     AgentCheckpoint,
+    AgentRun,
+    KnowledgeDraft,
     MemoryItem,
     ReminderPreference,
     RetrievalDocument,
     ReviewCard,
     ReviewEvent,
 )
+from memory_agent.runtime import get_agent_runtime
 
 
 def test_readiness_checks_database_connection() -> None:
@@ -62,12 +67,60 @@ def test_source_to_confirmed_draft_and_approved_memory() -> None:
         assert any(event["event_type"] == "tool.completed" for event in events)
         assert any(event["event_type"] == "draft.created" for event in events)
         assert any(event["event_type"] == "checkpoint.created" for event in events)
+        schema_completed = next(
+            event for event in events
+            if event["event_type"] == "tool.completed"
+            and event["payload"].get("tool") == "schema_validate"
+            and event["payload"].get("result_summary", {}).get("valid") is True
+        )
+        final_drafting = next(
+            event for event in events
+            if event["seq"] > schema_completed["seq"]
+            and event["event_type"] == "run.state_changed"
+            and event["payload"].get("state") == "drafting"
+        )
+        draft_created = next(event for event in events if event["event_type"] == "draft.created")
+        checkpoint_created = next(event for event in events if event["event_type"] == "checkpoint.created")
+        awaiting_user = next(
+            event for event in events
+            if event["event_type"] == "run.state_changed"
+            and event["payload"].get("state") == "awaiting_user"
+        )
+        assert schema_completed["seq"] < final_drafting["seq"] < draft_created["seq"]
+        assert draft_created["seq"] < checkpoint_created["seq"] < awaiting_user["seq"]
+        assert not any(
+            event["event_type"] == "agent.decision"
+            for event in events
+            if schema_completed["seq"] < event["seq"] < draft_created["seq"]
+        )
 
         draft_response = client.get(f"/api/v1/runs/{run_id}/draft")
         assert draft_response.status_code == 200, draft_response.text
         draft = draft_response.json()
         assert 1 <= len(draft["units"]) <= 10
         assert draft["units"][0]["evidence"][0]["evidence_type"] == "source_span"
+
+        recovery_session = SessionLocal()
+        try:
+            recovering_run = recovery_session.get(AgentRun, UUID(run_id))
+            assert recovering_run is not None
+            recovering_run.state = "drafting"
+            recovery_session.commit()
+        finally:
+            recovery_session.close()
+        get_agent_runtime().execute(UUID(run_id))
+        recovered_events = client.get(f"/api/v1/runs/{run_id}/events").json()
+        assert sum(event["event_type"] == "draft.created" for event in recovered_events) == 1
+        recovery_session = SessionLocal()
+        try:
+            assert recovery_session.scalar(
+                select(func.count(KnowledgeDraft.id)).where(KnowledgeDraft.run_id == UUID(run_id))
+            ) == 1
+            assert recovery_session.scalar(
+                select(func.count(AgentCheckpoint.id)).where(AgentCheckpoint.run_id == UUID(run_id))
+            ) == 1
+        finally:
+            recovery_session.close()
 
         confirm_response = client.post(f"/api/v1/drafts/{draft['id']}/confirm")
         assert confirm_response.status_code == 200, confirm_response.text
@@ -232,6 +285,9 @@ def test_source_to_confirmed_draft_and_approved_memory() -> None:
         session = SessionLocal()
         try:
             assert session.scalar(select(func.count(AgentCheckpoint.id))) == 1
+            assert session.scalar(
+                select(func.count(KnowledgeDraft.id)).where(KnowledgeDraft.run_id == UUID(run_id))
+            ) == 1
             assert session.scalar(select(func.count(MemoryItem.id))) == 1
             assert session.scalar(select(func.count(RetrievalDocument.id))) == 1
             assert session.scalar(select(func.count(ReviewCard.id))) == len(draft["units"])

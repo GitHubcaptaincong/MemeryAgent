@@ -523,18 +523,15 @@
   background: #f2f2f7;
 }
 
-.processing-progress {
-  height: 5rpx;
-  overflow: hidden;
-  border-radius: 3rpx;
-  background: #d1d1d6;
+.processing-status-detail {
+  display: block;
+  color: #3a3a3c;
+  font-size: 22rpx;
+  line-height: 1.5;
 }
 
-.processing-progress view {
-  height: 100%;
-  border-radius: 3rpx;
-  background: #007aff;
-}
+.processing-facts { margin-top: 12rpx; }
+.processing-facts text { display: block; padding: 5rpx 0; color: #248a3d; font-size: 21rpx; }
 
 .processing-events {
   max-height: 240rpx;
