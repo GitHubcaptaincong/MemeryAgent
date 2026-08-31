@@ -4,17 +4,18 @@
 
 ```mermaid
 flowchart LR
-    Mini[微信小程序] -->|回答立即落库| API[FastAPI]
+    Mini[微信小程序] -->|答题立即落库| API[FastAPI API]
     API --> Events[(ReviewEvent 不可变事件)]
     API --> Jobs[(BackgroundJob)]
     Jobs --> Evaluator[回答评估器]
     Evaluator --> Events
     Events --> Insights[趋势与薄弱项只读聚合]
     Mini -->|用户点击授权| Grants[(一次性授权额度)]
-    Timer[定时云函数] -->|claim| API
-    API -->|到期任务| Timer
-    Timer --> WeChat[订阅消息 send]
-    Timer -->|sent failed uncertain| API
+    Worker[Python Reminder Worker] -->|claim_due_reminders| DB[(PostgreSQL)]
+    DB -->|sending delivery + reserved grant| Worker
+    Worker --> Client[WeChatClient + access_token cache]
+    Client --> WeChat[微信订阅消息 HTTP API]
+    Worker -->|sent failed uncertain| DB
 ```
 
 ## 1. AI 回答评估
@@ -69,48 +70,59 @@ APP_INLINE_WORKER=true
 
 实际字段名以“我的模板”页面为准，例如可能是 `number1`、`time2`、`thing3`。不要照抄示例，也不要把模板 ID 写入小程序源码。
 
-### 3.2 配置 FastAPI 云托管服务
+### 3.2 配置后端与 Reminder Worker
 
-生成一个足够长的随机共享密钥，只保存到云端环境变量：
+订阅消息发送只使用微信官方 HTTP API，不需要 CloudBase 环境、套餐、云函数或 Cron。以下变量配置在 FastAPI API 与 Python Worker 共享的后端环境中；`APP_WECHAT_APP_SECRET` 只放在服务端环境变量，不写入小程序或仓库：
 
 ```env
 APP_REMINDER_DELIVERY_ENABLED=true
-APP_REMINDER_DISPATCH_TOKEN=<long-random-shared-secret>
+APP_WECHAT_APP_ID=<mini-program-app-id>
+APP_WECHAT_APP_SECRET=<mini-program-app-secret>
 APP_WECHAT_SUBSCRIBE_TEMPLATE_ID=<real-template-id>
 APP_WECHAT_SUBSCRIBE_PAGE=pages/review/review
+WECHAT_TEMPLATE_FIELD_MAP_JSON={"due_count":"number1","reminder_time":"time2","summary":"thing3"}
 APP_REMINDER_BATCH_SIZE=50
 APP_REMINDER_LEASE_SECONDS=120
+APP_REMINDER_WORKER_INTERVAL_SECONDS=60
+APP_WECHAT_SEND_TIMEOUT_SECONDS=10
 ```
 
-如果模板或共享密钥缺失，状态接口会显示发送服务未就绪。先保持 `APP_REMINDER_DELIVERY_ENABLED=false`，完成下面的云函数配置后再开启。
+`APP_REMINDER_DELIVERY_ENABLED` 默认保持 `false`。只有 delivery 开关、模板 ID、AppID、AppSecret 都可用时，Worker 才会领取任务；`GET /api/v1/reminders/status` 也只有在这四类配置齐全时才显示发送能力已开启。
 
-### 3.3 部署定时云函数
+Compose 中 `api` 只负责 HTTP API，`worker` 同时运行既有 Agent 任务循环和 Reminder Worker。不要给 `worker` 配置多个副本；如果未来拆分部署，也保持只有一个 Reminder Dispatcher 实例。
 
-上传 [cloudfunctions/reminder-dispatch](../cloudfunctions/reminder-dispatch/) 为独立云函数，安装其中 `package.json` 的依赖，并配置每 5 分钟触发。云函数环境变量：
+### 3.3 运行链路与状态边界
 
-```env
-MEMORY_AGENT_BASE_URL=https://你的云托管公网域名
-MEMORY_AGENT_REMINDER_TOKEN=<与 APP_REMINDER_DISPATCH_TOKEN 完全相同>
-WECHAT_TEMPLATE_FIELD_MAP_JSON={"due_count":"number1","reminder_time":"time2","summary":"thing3"}
-WECHAT_MINIPROGRAM_STATE=developer
+```text
+Reminder Worker（每 60 秒一次 tick）
+→ claim_due_reminders()：按用户时区、preferred_time、due_at、每日去重领取
+→ available grant 原子占用为 reserved，创建 sending delivery
+→ WeChatClient 调用微信官方 subscribe/send
+→ record_delivery_result() 写入 sent / failed / uncertain
 ```
 
-`MEMORY_AGENT_BASE_URL` 不附加 `/api/v1`。联调、体验版、正式版分别使用 `developer`、`trial`、`formal`。完整云函数参数和错误边界见 [云函数 README](../cloudfunctions/reminder-dispatch/README.md)。
+- 微信返回 `errcode=0`：delivery 为 `sent`，一次性授权额度变为 `consumed`。
+- 微信明确返回 `40037` 或 `43101`：delivery 为 `failed`，额度变为 `invalid`。
+- 其他明确 `errcode`：delivery 为 `failed`，额度回到 `available`。
+- token 获取网络失败、HTTP 超时或响应无法确认：delivery 为 `uncertain`，额度保持 `reserved`，不会自动重发。
 
-定时任务放在云函数而不是 FastAPI 容器内：容器实例可能缩容或重启，不适合依赖进程内 cron。FastAPI 只负责按用户时区原子领取任务、占用一次性授权、去重和保存结果。
+`WeChatClient` 通过 `GET /cgi-bin/token` 获取 `access_token`，按 AppID 在进程内缓存，微信 `expires_in=7200` 时实际缓存约 7000 秒；遇到 `40001/40014/41001/42001` 会强制刷新并最多重试发送一次。当前项目没有 Redis 基础设施，因此没有引入 Redis，缓存只在单 Worker 进程内共享。
 
-### 3.4 真机闭环验收
+Worker 不再通过内部 HTTP 接口回调 FastAPI；旧的 `/api/v1/internal/reminders/dispatch/*` 和共享 dispatch token 已删除。定时调度、业务领取和发送都留在同一个 Python 服务层内，HTTP API 进程不被提醒发送阻塞。
 
-订阅授权必须在用户点击事件中直接调用 `wx.requestSubscribeMessage`，开发者工具不能替代最终真机验证。
+### 3.4 本地与真机闭环验收
 
-1. 在“提醒”页点击“授权一次复习提醒”并同意；可用次数应增加 1。
-2. 将提醒时间临时调到当前时间之前，并确认至少有一张到期卡。
-3. 临时把云函数 cron 调快，观察 claim、微信发送和 result 回写。
-4. 真机收到消息后，可用次数减 1，发送状态为 `sent`。
-5. 再触发一次，同一用户、模板和本地日期不得重复发送。
-6. 模拟微信超时或发送后回写中断，任务应为 `uncertain`，不得自动重发。
-7. 验证另一个 OpenID 无法读取当前用户的授权、评估或统计数据。
+本地验收：
+
+1. 在 `.env` 配置上文字段，并保持 `APP_REMINDER_DELIVERY_ENABLED=false` 启动数据库、API 和 Worker。
+2. 创建/导入知识集并确认草稿，让至少一张复习卡到期。
+3. 在小程序“提醒”页点击授权，确认可用次数增加。
+4. 开启 `APP_REMINDER_DELIVERY_ENABLED=true` 并重启 Worker，把提醒时间临时调到当前时间之后 1 分钟内。
+5. 观察 Worker 日志中的 `reminder worker tick`、`due reminders claimed`、`reminder delivery started`、微信 `errcode` 和 `delivery result`。
+6. 查询 `reminder_deliveries` 与 `reminder_subscription_grants`，确认 `sent/consumed`；再等待一个 tick，确认同一用户、模板、本地日期不会重复发送。
+
+真机验收必须由用户点击触发 `wx.requestSubscribeMessage`；开发者工具不能替代最终真机验证。真机收到消息后，可用次数减 1。模拟超时或结果回写中断时，任务应停留为 `uncertain`，不得自动重发。
 
 ## 当前验证边界
 
-仓库可自动验证 Fake 模型评估、后台任务幂等、统计只读性、提醒额度和发送去重。真实微信消息仍依赖你的小程序模板 ID、实际字段名和云环境权限，因此在完成上述真机步骤前，只能声称“发送链路已实现并通过本地模拟”，不能声称“线上订阅消息已验证”。
+仓库自动化测试覆盖 Fake 模型评估、后台任务幂等、统计只读、提醒额度、发送去重、微信 HTTP 客户端、access_token 缓存与失效重试、Worker 异常恢复，以及 sent/failed/uncertain 对授权额度的影响。真实微信线上发送仍依赖你的小程序 AppID/AppSecret、实际模板字段和真机授权，未在本仓库中验证；完成上述真机步骤前，只能说“发送链路已实现并通过本地模拟验证”，不能声称“线上订阅消息已验证”。

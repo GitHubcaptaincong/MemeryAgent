@@ -1,3 +1,5 @@
+import pytest
+
 from memory_agent.config import Settings
 
 
@@ -57,6 +59,40 @@ def test_wechat_auth_requires_expected_app_id() -> None:
         assert "APP_WECHAT_APP_ID is required" in str(exc)
     else:
         raise AssertionError("wechat auth without an expected AppID must fail")
+
+
+def test_wechat_template_map_supports_unprefixed_server_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "WECHAT_TEMPLATE_FIELD_MAP_JSON",
+        '{"due_count":"number2","reminder_time":"time3","summary":"thing1"}',
+    )
+
+    settings = Settings()
+
+    assert settings.wechat_template_field_map == {
+        "due_count": "number2",
+        "reminder_time": "time3",
+        "summary": "thing1",
+    }
+
+
+def test_reminder_delivery_ready_requires_all_credentials() -> None:
+    partial = Settings(
+        reminder_delivery_enabled=True,
+        wechat_app_id="wx1234567890",
+        wechat_subscribe_template_id="template-id",
+    )
+    complete = Settings(
+        reminder_delivery_enabled=True,
+        wechat_app_id="wx1234567890",
+        wechat_app_secret="app-secret",
+        wechat_subscribe_template_id="template-id",
+    )
+
+    assert partial.reminder_delivery_ready is False
+    assert complete.reminder_delivery_ready is True
 
 
 def test_wechat_legacy_claim_modes_are_mutually_exclusive() -> None:

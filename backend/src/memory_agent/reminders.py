@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-import secrets
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from fastapi import HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -94,21 +92,13 @@ def reminder_status(
         "delivery_enabled": bool(
             settings.reminder_delivery_enabled
             and template_id
-            and settings.reminder_dispatch_token_value
+            and settings.wechat_app_id
+            and settings.wechat_app_secret_value
         ),
         "available_grants": grant_count,
         "last_delivery_status": latest.status if latest else None,
         "last_sent_at": latest.sent_at if latest else None,
     }
-
-
-def verify_dispatch_token(provided: str | None, settings: Settings) -> None:
-    expected = settings.reminder_dispatch_token_value
-    if not expected or not provided or not secrets.compare_digest(expected, provided):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="invalid reminder dispatch token",
-        )
 
 
 def claim_due_reminders(
@@ -217,6 +207,7 @@ def claim_due_reminders(
         jobs.append(
             {
                 "id": str(delivery.id),
+                "user_id": str(delivery.user_id),
                 "openid": identity.openid,
                 "template_id": delivery.template_id,
                 "page": settings.wechat_subscribe_page,

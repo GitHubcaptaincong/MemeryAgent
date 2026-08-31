@@ -89,6 +89,6 @@ X-WX-SERVICE: 你的服务名称
 
 ## 当前边界
 
-- 微信订阅消息代码已接入，但真实推送需要先配置模板 ID、字段映射、共享密钥和定时云函数，并完成真机授权测试。参见 [学习辅助模块部署](../docs/learning-assistance.md)。
+- 微信订阅消息代码已接入，但真实推送需要先在后端配置小程序 AppID/AppSecret、模板 ID和字段映射，并启动 Python Reminder Worker 后完成真机授权测试。参见 [学习辅助模块部署](../docs/learning-assistance.md)。
 - 当前复习调度使用官方 `py-fsrs 6.3.1` 的版本化默认配置；尚未训练个人参数。
 - AI 评估只提供建议；用户最终评分仍是 FSRS 的唯一输入。模型慢或失败不会阻塞评分。

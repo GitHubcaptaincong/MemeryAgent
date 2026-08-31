@@ -127,6 +127,12 @@ $env:APP_MODEL_NAME="<model-name>"
 .\.venv\Scripts\memory-agent-api.exe
 ```
 
+如需后台任务、复习提醒定时领取或真实微信订阅消息发送，另开一个终端运行同一个虚拟环境中的常驻 Worker：
+
+```powershell
+.\.venv\Scripts\memory-agent-worker.exe
+```
+
 不接入真实模型时，可以将 `APP_MODEL_PROVIDER` 设置为 `fake`，用于本地流程调试和确定性回归测试。
 
 ### Web 客户端
@@ -151,8 +157,8 @@ npm run dev
 - 部署前执行 Alembic migration，不要依赖开发环境的自动建表。
 - Vue H5 执行 `npm run build` 后可以部署到任意静态站点或 Web Server。
 - 微信小程序可以通过公网 HTTPS API 或平台提供的容器调用能力访问后端。
-- 微信订阅提醒需要外部定时任务触发，不能依赖可能缩容或重启的 API 进程内定时器。
-- 数据库连接、模型凭证、微信密钥和提醒共享密钥应通过环境变量或密钥服务提供。
+- 微信订阅提醒由单副本 `memory-agent-worker` 定时领取并发送，API 进程不承担定时器职责。
+- 数据库连接、模型凭证、微信 AppSecret 和提醒模板配置应通过环境变量或密钥服务提供。
 
 完整环境变量示例见 [.env.example](./.env.example)。
 
@@ -163,7 +169,7 @@ npm run dev
 npm --prefix .\frontend run build
 ```
 
-后端测试覆盖主要 API 闭环、证据定位、模型协议、任务恢复、FSRS 调度、回答评估、学习统计、微信身份隔离和提醒幂等。
+后端测试覆盖主要 API 闭环、证据定位、模型协议、任务恢复、FSRS 调度、回答评估、学习统计、微信身份隔离、提醒幂等、微信 access_token 缓存和 Reminder Worker 恢复。
 
 ## 项目结构
 
@@ -173,7 +179,6 @@ backend/migrations/         Alembic 数据库迁移
 backend/tests/              后端自动化测试
 frontend/src/               Vue 3 移动 H5
 miniprogram/                原生微信小程序客户端
-cloudfunctions/             微信订阅消息定时发送桥接
 .agents/skills/             Agent 只读 Skills
 docs/                       架构、可靠性、复习与部署边界文档
 infra/postgres/             PostgreSQL 扩展初始化

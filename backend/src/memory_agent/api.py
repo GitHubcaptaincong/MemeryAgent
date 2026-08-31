@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from urllib.parse import urlsplit
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session, selectinload
@@ -70,8 +70,6 @@ from memory_agent.schemas import (
     ReminderPreferenceUpdate,
     ReminderSubscriptionGrantCreate,
     ReminderSubscriptionStatusRead,
-    ReminderDispatchClaim,
-    ReminderDispatchResult,
     ReviewAnswerCreate,
     ReviewAnswerRead,
     ReviewEvaluationRead,
@@ -100,11 +98,8 @@ from memory_agent.source_ingestion import (
     fetch_public_source,
 )
 from memory_agent.reminders import (
-    claim_due_reminders,
-    record_delivery_result,
     record_subscription_result,
     reminder_status,
-    verify_dispatch_token,
 )
 
 
@@ -553,46 +548,6 @@ def get_reminder_subscription_status(
     return ReminderSubscriptionStatusRead.model_validate(
         reminder_status(session, user_id=identity.user.id, settings=identity.settings)
     )
-
-
-@router.post("/internal/reminders/dispatch/claim")
-def post_reminder_dispatch_claim(
-    data: ReminderDispatchClaim,
-    x_reminder_dispatch_token: str | None = Header(default=None),
-    session: Session = Depends(get_session),
-    settings: Settings = Depends(get_settings),
-) -> dict[str, list[dict[str, object]]]:
-    verify_dispatch_token(x_reminder_dispatch_token, settings)
-    return {
-        "jobs": claim_due_reminders(
-            session,
-            settings=settings,
-            batch_size=min(data.batch_size, settings.reminder_batch_size),
-            lease_seconds=min(data.lease_seconds, settings.reminder_lease_seconds),
-        )
-    }
-
-
-@router.post("/internal/reminders/dispatch/{delivery_id}/result")
-def post_reminder_dispatch_result(
-    delivery_id: UUID,
-    data: ReminderDispatchResult,
-    x_reminder_dispatch_token: str | None = Header(default=None),
-    session: Session = Depends(get_session),
-    settings: Settings = Depends(get_settings),
-) -> dict[str, str]:
-    verify_dispatch_token(x_reminder_dispatch_token, settings)
-    try:
-        delivery = record_delivery_result(
-            session,
-            delivery_id=delivery_id,
-            result_status=data.status,
-            wechat_errcode=data.wechat_errcode,
-            wechat_errmsg=data.wechat_errmsg,
-        )
-    except LookupError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return {"id": str(delivery.id), "status": delivery.status}
 
 
 @router.post("/sources", response_model=SourceRead, status_code=status.HTTP_201_CREATED)

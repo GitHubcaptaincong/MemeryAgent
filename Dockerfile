@@ -5,7 +5,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     APP_ENV=production \
     APP_AUTO_CREATE_SCHEMA=false \
-    APP_INLINE_WORKER=true \
+    APP_INLINE_WORKER=false \
     APP_SKILL_ROOT=/skills
 
 WORKDIR /app
@@ -19,4 +19,4 @@ RUN --mount=type=cache,target=/root/.cache/pip pip install .
 
 EXPOSE 8000
 
-CMD ["/bin/sh", "-c", "alembic upgrade head && uvicorn memory_agent.main:app --host 0.0.0.0 --port 8000"]
+CMD ["/bin/sh", "-c", "alembic upgrade head && (memory-agent-worker &) && exec uvicorn memory_agent.main:app --host 0.0.0.0 --port 8000"]

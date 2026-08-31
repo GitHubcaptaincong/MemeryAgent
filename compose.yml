@@ -36,6 +36,13 @@ services:
       APP_AGENT_MAX_SECONDS: "600"
       APP_AUTO_CREATE_SCHEMA: "false"
       APP_INLINE_WORKER: "false"
+      APP_REMINDER_DELIVERY_ENABLED: ${APP_REMINDER_DELIVERY_ENABLED:-false}
+      APP_REMINDER_WORKER_INTERVAL_SECONDS: ${APP_REMINDER_WORKER_INTERVAL_SECONDS:-60}
+      APP_WECHAT_APP_ID: ${APP_WECHAT_APP_ID:-}
+      APP_WECHAT_APP_SECRET: ${APP_WECHAT_APP_SECRET:-}
+      APP_WECHAT_SUBSCRIBE_TEMPLATE_ID: ${APP_WECHAT_SUBSCRIBE_TEMPLATE_ID:-}
+      APP_WECHAT_SUBSCRIBE_PAGE: ${APP_WECHAT_SUBSCRIBE_PAGE:-pages/review/review}
+      WECHAT_TEMPLATE_FIELD_MAP_JSON: "${WECHAT_TEMPLATE_FIELD_MAP_JSON:-{\"due_count\":\"number1\",\"reminder_time\":\"time2\",\"summary\":\"thing3\"}}"
       APP_SKILL_ROOT: /skills
     command: ["/bin/sh", "-c", "alembic upgrade head && uvicorn memory_agent.main:app --host 0.0.0.0 --port 8000"]
     volumes:
@@ -69,6 +76,13 @@ services:
       APP_AGENT_MAX_SECONDS: "600"
       APP_AUTO_CREATE_SCHEMA: "false"
       APP_INLINE_WORKER: "false"
+      APP_REMINDER_DELIVERY_ENABLED: ${APP_REMINDER_DELIVERY_ENABLED:-false}
+      APP_REMINDER_WORKER_INTERVAL_SECONDS: ${APP_REMINDER_WORKER_INTERVAL_SECONDS:-60}
+      APP_WECHAT_APP_ID: ${APP_WECHAT_APP_ID:-}
+      APP_WECHAT_APP_SECRET: ${APP_WECHAT_APP_SECRET:-}
+      APP_WECHAT_SUBSCRIBE_TEMPLATE_ID: ${APP_WECHAT_SUBSCRIBE_TEMPLATE_ID:-}
+      APP_WECHAT_SUBSCRIBE_PAGE: ${APP_WECHAT_SUBSCRIBE_PAGE:-pages/review/review}
+      WECHAT_TEMPLATE_FIELD_MAP_JSON: "${WECHAT_TEMPLATE_FIELD_MAP_JSON:-{\"due_count\":\"number1\",\"reminder_time\":\"time2\",\"summary\":\"thing3\"}}"
       APP_SKILL_ROOT: /skills
     command: ["memory-agent-worker"]
     volumes:

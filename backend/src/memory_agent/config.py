@@ -1,10 +1,12 @@
 from functools import lru_cache
+import json
 from pathlib import Path
+import re
 from typing import Literal
 from urllib.parse import urlsplit
 from uuid import UUID
 
-from pydantic import Field, SecretStr, field_validator, model_validator
+from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -27,6 +29,7 @@ class Settings(BaseSettings):
     local_user_id: UUID = UUID("00000000-0000-0000-0000-000000000001")
     local_user_email: str = "local@memory-agent.test"
     wechat_app_id: str | None = None
+    wechat_app_secret: SecretStr | None = None
     wechat_legacy_owner_openid: SecretStr | None = None
     wechat_claim_local_user: bool = False
     model_provider: str = "fake"
@@ -56,11 +59,40 @@ class Settings(BaseSettings):
     inline_worker: bool = True
     worker_poll_seconds: float = Field(default=1.0, ge=0.1, le=60)
     reminder_delivery_enabled: bool = False
-    reminder_dispatch_token: SecretStr | None = None
     wechat_subscribe_template_id: str | None = None
     wechat_subscribe_page: str = "pages/review/review"
+    wechat_template_field_map_json: dict[str, str] = Field(
+        default_factory=lambda: {
+            "due_count": "number1",
+            "reminder_time": "time2",
+            "summary": "thing3",
+        },
+        validation_alias=AliasChoices(
+            "wechat_template_field_map_json",
+            "APP_WECHAT_TEMPLATE_FIELD_MAP_JSON",
+            "WECHAT_TEMPLATE_FIELD_MAP_JSON",
+        ),
+    )
+    wechat_miniprogram_state: str = Field(
+        default="developer",
+        validation_alias=AliasChoices(
+            "wechat_miniprogram_state",
+            "APP_WECHAT_MINIPROGRAM_STATE",
+            "WECHAT_MINIPROGRAM_STATE",
+        ),
+    )
+    wechat_subscribe_lang: str = Field(
+        default="zh_CN",
+        validation_alias=AliasChoices(
+            "wechat_subscribe_lang",
+            "APP_WECHAT_SUBSCRIBE_LANG",
+            "WECHAT_SUBSCRIBE_LANG",
+        ),
+    )
     reminder_batch_size: int = Field(default=50, ge=1, le=200)
     reminder_lease_seconds: int = Field(default=120, ge=30, le=600)
+    reminder_worker_interval_seconds: int = Field(default=60, ge=5, le=600)
+    wechat_send_timeout_seconds: float = Field(default=10.0, ge=1.0, le=60.0)
     skill_root: Path = WORKSPACE_ROOT / ".agents" / "skills"
 
     @field_validator("database_url", mode="before")
@@ -109,6 +141,37 @@ class Settings(BaseSettings):
             )
         return self
 
+    @field_validator("wechat_template_field_map_json", mode="before")
+    @classmethod
+    def parse_wechat_template_field_map(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError as exc:
+            raise ValueError("WECHAT_TEMPLATE_FIELD_MAP_JSON must be valid JSON") from exc
+
+    @model_validator(mode="after")
+    def validate_reminder_settings(self) -> "Settings":
+        if not self.wechat_template_field_map_json:
+            raise ValueError("WECHAT_TEMPLATE_FIELD_MAP_JSON must contain at least one field")
+        targets: set[str] = set()
+        for logical_field, template_field in self.wechat_template_field_map_json.items():
+            if not logical_field.strip() or not template_field.strip():
+                raise ValueError("template field mapping keys and values must be non-empty")
+            if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*\d+", template_field):
+                raise ValueError(
+                    f"invalid WeChat template field name for {logical_field}"
+                )
+            if template_field in targets:
+                raise ValueError(f"duplicate WeChat template field mapping: {template_field}")
+            targets.add(template_field)
+        if self.wechat_miniprogram_state not in {"developer", "trial", "formal"}:
+            raise ValueError("WeChat miniprogram state must be developer, trial, or formal")
+        if self.wechat_subscribe_lang not in {"zh_CN", "zh_TW", "en"}:
+            raise ValueError("WeChat subscribe language must be zh_CN, zh_TW, or en")
+        return self
+
     @property
     def is_sqlite(self) -> bool:
         return self.database_url.startswith("sqlite")
@@ -130,11 +193,24 @@ class Settings(BaseSettings):
         )
 
     @property
-    def reminder_dispatch_token_value(self) -> str | None:
+    def wechat_app_secret_value(self) -> str | None:
         return (
-            self.reminder_dispatch_token.get_secret_value()
-            if self.reminder_dispatch_token
+            self.wechat_app_secret.get_secret_value()
+            if self.wechat_app_secret
             else None
+        )
+
+    @property
+    def wechat_template_field_map(self) -> dict[str, str]:
+        return dict(self.wechat_template_field_map_json)
+
+    @property
+    def reminder_delivery_ready(self) -> bool:
+        return bool(
+            self.reminder_delivery_enabled
+            and self.wechat_subscribe_template_id
+            and self.wechat_app_id
+            and self.wechat_app_secret_value
         )
 
 @lru_cache

@@ -369,15 +369,3 @@ class ReminderSubscriptionStatusRead(ApiModel):
     available_grants: int
     last_delivery_status: str | None
     last_sent_at: datetime | None
-
-
-class ReminderDispatchClaim(ApiModel):
-    batch_size: int = Field(default=50, ge=1, le=200)
-    lease_seconds: int = Field(default=120, ge=30, le=600)
-
-
-class ReminderDispatchResult(ApiModel):
-    status: Literal["sent", "failed", "uncertain"]
-    wechat_errcode: int | None = None
-    wechat_errmsg: str | None = Field(default=None, max_length=500)
-    response: dict[str, Any] | None = None

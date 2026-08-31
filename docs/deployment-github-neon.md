@@ -60,7 +60,7 @@ POST /api/v1/runs
 GET  /api/v1/review/overview
 ```
 
-MVP 阶段建议 CloudBase 最大实例数先设为 1，避免多个新实例同时执行数据库迁移。后续再把迁移从容器启动命令拆成独立发布步骤。
+MVP 阶段建议 CloudBase 最大实例数先设为 1，避免多个新实例同时执行数据库迁移，也避免多个 Reminder Worker 同时刷新微信 `access_token`。后续再把迁移和 Worker 拆成独立发布步骤。
 
 ## 3. CloudBase 后端环境变量
 
@@ -70,11 +70,17 @@ MVP 阶段建议 CloudBase 最大实例数先设为 1，避免多个新实例同
 APP_ENV=production
 APP_DATABASE_URL=<Neon connection string>
 APP_AUTO_CREATE_SCHEMA=false
-APP_INLINE_WORKER=true
+APP_INLINE_WORKER=false
 APP_CORS_ORIGINS=https://githubcaptaincong.github.io
 APP_AUTH_MODE=wechat
 APP_WECHAT_APP_ID=<your-mini-program-app-id>
+APP_WECHAT_APP_SECRET=<your-mini-program-app-secret>
 APP_WECHAT_CLAIM_LOCAL_USER=false
+
+# 微信订阅消息；保持 false 时 Worker 不会领取发送任务。
+APP_REMINDER_DELIVERY_ENABLED=false
+APP_WECHAT_SUBSCRIBE_TEMPLATE_ID=<real-template-id>
+WECHAT_TEMPLATE_FIELD_MAP_JSON={"due_count":"number1","reminder_time":"time2","summary":"thing3"}
 
 APP_MODEL_PROVIDER=cli_proxy
 APP_MODEL_BASE_URL=https://<current-cpolar-host>/v1
@@ -99,7 +105,7 @@ APP_CORS_ORIGINS=https://githubcaptaincong.github.io,https://example.com
 
 - GitHub Pages：可以长期公开，只有示例数据。
 - 微信小程序：通过 OpenID 映射内部用户，业务数据按 `user_id` 隔离；首次认领旧数据后必须关闭一次性认领开关。
-- CloudBase API：用户接口要求微信身份 Header；健康检查和就绪检查仍公开供平台探活。上线给陌生人使用前仍应增加限流和内容安全控制。
+- CloudBase API：仅作为可选容器托管平台使用；根 Dockerfile 会在后台启动 `memory-agent-worker`，微信提醒不需要 CloudBase Function、Cron 或 `wx-server-sdk`。用户接口要求微信身份 Header；健康检查和就绪检查仍公开供平台探活。上线给陌生人使用前仍应增加限流和内容安全控制。
 - 本机模型：本机离线不影响 GitHub Pages 演示；真实生成暂时不可用。
 - Neon：定期执行 `pg_dump` 保存可恢复备份，免费服务不代替项目自己的备份策略。
 
