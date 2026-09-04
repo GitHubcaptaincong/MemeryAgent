@@ -22,6 +22,7 @@ from memory_agent.models import (
     WechatIdentity,
 )
 from memory_agent.reminders import (
+    build_reminder_logical_data,
     claim_due_reminders,
     record_delivery_result,
     record_subscription_result,
@@ -234,6 +235,8 @@ def test_claim_reserves_grant_and_applies_daily_limit() -> None:
         assert jobs[0]["openid"] == openid
         assert jobs[0]["template_id"] == TEMPLATE_ID
         assert jobs[0]["data"]["due_count"] == "2"
+        assert jobs[0]["data"]["plan_name"] == "今日知识复习"
+        assert jobs[0]["data"]["summary"] == "今天有 2 个知识点建议复习"
 
         session.refresh(grant)
         delivery = session.scalar(
@@ -244,6 +247,17 @@ def test_claim_reserves_grant_and_applies_daily_limit() -> None:
         assert delivery.grant_id == grant.id
         assert delivery.status == "sending"
         assert delivery.due_count == 2
+
+
+def test_reminder_logical_data_contains_plan_name() -> None:
+    assert build_reminder_logical_data(
+        due_count=11, reminder_time="2026-09-04 09:30"
+    ) == {
+        "plan_name": "今日知识复习",
+        "due_count": "11",
+        "reminder_time": "2026-09-04 09:30",
+        "summary": "今天有 11 个知识点建议复习",
+    }
 
 
 def test_sent_delivery_consumes_grant_and_is_not_claimed_twice_same_day() -> None:

@@ -26,6 +26,16 @@ PLAN_NAME = "今日知识复习"
 THING_MAX_CHARS = 20
 
 
+def build_reminder_logical_data(*, due_count: int, reminder_time: str) -> dict[str, str]:
+    """Build the stable logical reminder data consumed by the dispatcher."""
+    return {
+        "plan_name": PLAN_NAME,
+        "due_count": str(due_count),
+        "reminder_time": reminder_time,
+        "summary": truncate_thing(f"今天有 {due_count} 个知识点建议复习"),
+    }
+
+
 def record_subscription_result(
     session: Session,
     *,
@@ -214,14 +224,10 @@ def claim_due_reminders(
                 "openid": identity.openid,
                 "template_id": delivery.template_id,
                 "page": settings.wechat_subscribe_page,
-                "data": {
-                    "plan_name": PLAN_NAME,
-                    "due_count": str(delivery.due_count),
-                    "reminder_time": local_now.strftime("%Y-%m-%d %H:%M"),
-                    "summary": truncate_thing(
-                        f"今天有 {delivery.due_count} 个知识点建议复习"
-                    ),
-                },
+                "data": build_reminder_logical_data(
+                    due_count=delivery.due_count,
+                    reminder_time=local_now.strftime("%Y-%m-%d %H:%M"),
+                ),
             }
         )
     session.commit()
