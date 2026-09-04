@@ -6,7 +6,7 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from memory_agent.api import router
+from memory_agent.api import internal_router, router
 from memory_agent.bootstrap import ensure_local_identity
 from memory_agent.config import get_settings
 from memory_agent.database import SessionLocal, create_schema_for_development
@@ -40,6 +40,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(router)
+app.include_router(internal_router)
 
 
 def run() -> None:

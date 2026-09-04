@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from urllib.parse import urlsplit
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session, selectinload
@@ -101,9 +101,82 @@ from memory_agent.reminders import (
     record_subscription_result,
     reminder_status,
 )
+from memory_agent.reminder_worker import map_template_data
+from memory_agent.wechat import WeChatClient, WeChatClientError
+from pydantic import BaseModel, Field
+import secrets
 
 
 router = APIRouter(prefix="/api/v1")
+internal_router = APIRouter()
+
+
+class DebugWechatReminderRequest(BaseModel):
+    openid: str = Field(min_length=1, max_length=128)
+    template_id: str | None = Field(default=None, min_length=1, max_length=256)
+    due_count: int = Field(default=13, ge=0, le=99999)
+    reminder_time: str = Field(default="2026-08-13 12:00", min_length=1, max_length=64)
+
+
+@internal_router.post("/internal/debug/wechat-reminder")
+async def debug_wechat_reminder(
+    body: DebugWechatReminderRequest,
+    request: Request,
+    settings: Settings = Depends(get_settings),
+) -> dict:
+    """Send a real WeChat test message without touching reminder persistence."""
+    configured_token = settings.debug_wechat_token
+    if configured_token is None:
+        raise HTTPException(status_code=404, detail="not found")
+    authorization = request.headers.get("authorization", "")
+    scheme, _, supplied = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not supplied or not secrets.compare_digest(
+        supplied, configured_token.get_secret_value()
+    ):
+        raise HTTPException(status_code=403, detail="forbidden")
+    template_id = body.template_id or settings.wechat_subscribe_template_id
+    if not template_id:
+        raise HTTPException(status_code=503, detail="WeChat template is not configured")
+    if not settings.wechat_app_id or not settings.wechat_app_secret_value:
+        raise HTTPException(status_code=503, detail="WeChat credentials are not configured")
+
+    logical_data = {
+        "plan_name": "今日知识复习",
+        "reminder_time": body.reminder_time,
+        "summary": f"今天有 {body.due_count} 个知识点建议复习",
+    }
+    payload = map_template_data(logical_data, settings.wechat_template_field_map)
+    client = WeChatClient(
+        app_id=settings.wechat_app_id,
+        app_secret=settings.wechat_app_secret_value,
+        timeout_seconds=settings.wechat_send_timeout_seconds,
+        miniprogram_state=settings.wechat_miniprogram_state,
+        lang=settings.wechat_subscribe_lang,
+    )
+    try:
+        result = await client.send_subscribe_message(
+            body.openid, template_id, settings.wechat_subscribe_page, payload
+        )
+        return {
+            "payload": payload,
+            "wechat": {"errcode": result.errcode, "errmsg": result.errmsg},
+            "http_status": 200,
+            "diagnostics": {
+                "template_id_source": "request" if body.template_id else "config",
+                "database_mutations": False,
+                "reminder_state_machine": "not_used",
+            },
+        }
+    except WeChatClientError as exc:
+        return {
+            "payload": payload,
+            "wechat": {"errcode": exc.errcode, "errmsg": exc.errmsg},
+            "http_status": 502,
+            "diagnostics": {"phase": exc.phase, "uncertain": exc.uncertain,
+                            "database_mutations": False},
+        }
+    finally:
+        await client.aclose()
 
 
 def _identity(identity: IdentityContext):

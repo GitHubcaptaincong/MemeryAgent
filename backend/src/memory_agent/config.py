@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     local_user_email: str = "local@memory-agent.test"
     wechat_app_id: str | None = None
     wechat_app_secret: SecretStr | None = None
+    debug_wechat_token: SecretStr | None = Field(
+        default=None,
+        validation_alias=AliasChoices("debug_wechat_token", "APP_DEBUG_WECHAT_TOKEN"),
+    )
     wechat_legacy_owner_openid: SecretStr | None = None
     wechat_claim_local_user: bool = False
     model_provider: str = "fake"
