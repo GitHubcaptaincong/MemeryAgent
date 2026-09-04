@@ -580,7 +580,7 @@ def create_card_reminder(card_id: UUID, data: CardReminderCreate, session: Sessi
         logger.exception("card_reminder.create.failed", extra={"user_id": str(identity.user.id), "card_id": str(card_id)})
         raise
     logger.info("card_reminder.created", extra={"user_id": str(identity.user.id), "card_id": str(card.id), "card_reminder_id": str(reminder.id), "scheduled_for": reminder.scheduled_for.isoformat(), "delay_seconds": data.delay_seconds, "status": reminder.status})
-    return CardReminderRead(reminder_id=reminder.id, review_card_id=reminder.review_card_id, scheduled_for=reminder.scheduled_for, status=reminder.status)
+    return CardReminderRead(reminder_id=reminder.id, review_card_id=reminder.review_card_id, scheduled_for=reminder.scheduled_for, status=reminder.status, created_at=reminder.created_at, updated_at=reminder.updated_at)
 
 
 @router.delete("/review/cards/{card_id}/reminders/{reminder_id}", response_model=CardReminderRead)
@@ -593,7 +593,7 @@ def cancel_card_reminder(card_id: UUID, reminder_id: UUID, session: Session = De
     reminder.status = "cancelled"
     session.commit()
     logger.info("card_reminder.status_changed", extra={"user_id": str(identity.user.id), "card_id": str(card_id), "card_reminder_id": str(reminder.id), "old_status": "scheduled", "new_status": "cancelled", "reason": "user_cancelled"})
-    return CardReminderRead(reminder_id=reminder.id, review_card_id=reminder.review_card_id, scheduled_for=reminder.scheduled_for, status=reminder.status)
+    return CardReminderRead(reminder_id=reminder.id, review_card_id=reminder.review_card_id, scheduled_for=reminder.scheduled_for, status=reminder.status, created_at=reminder.created_at, updated_at=reminder.updated_at)
 
 
 @router.get("/reminders/preferences", response_model=ReminderPreferenceRead)
