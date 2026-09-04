@@ -221,6 +221,34 @@
   opacity: 1;
 }
 
+.subscription-retry-button {
+  margin-top: 24rpx;
+}
+
+.subscription-feedback {
+  display: block;
+  margin-top: 18rpx;
+  padding: 20rpx 22rpx;
+  border-radius: 20rpx;
+  font-size: 22rpx;
+  line-height: 1.5;
+}
+
+.subscription-feedback--success {
+  background: #edf9f0;
+  color: #248a3d;
+}
+
+.subscription-feedback--warning {
+  background: #fff8e5;
+  color: #a36a00;
+}
+
+.subscription-feedback--error {
+  background: #fff0ef;
+  color: #c8251c;
+}
+
 .last-delivery {
   display: block;
   margin-top: 18rpx;

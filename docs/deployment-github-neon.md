@@ -80,7 +80,7 @@ APP_WECHAT_CLAIM_LOCAL_USER=false
 # 微信订阅消息；保持 false 时 Worker 不会领取发送任务。
 APP_REMINDER_DELIVERY_ENABLED=false
 APP_WECHAT_SUBSCRIBE_TEMPLATE_ID=<real-template-id>
-WECHAT_TEMPLATE_FIELD_MAP_JSON={"due_count":"number1","reminder_time":"time2","summary":"thing3"}
+WECHAT_TEMPLATE_FIELD_MAP_JSON={"plan_name":"thing2","reminder_time":"time1","summary":"thing3"}
 
 APP_MODEL_PROVIDER=cli_proxy
 APP_MODEL_BASE_URL=https://<current-cpolar-host>/v1

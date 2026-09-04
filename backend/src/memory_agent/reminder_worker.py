@@ -10,7 +10,13 @@ from uuid import UUID
 
 from memory_agent.config import Settings
 from memory_agent.models import utc_now
-from memory_agent.reminders import claim_due_reminders, record_delivery_result
+from memory_agent.reminders import (
+    PLAN_NAME,
+    THING_MAX_CHARS,
+    claim_due_reminders,
+    record_delivery_result,
+    truncate_thing,
+)
 from memory_agent.wechat import WeChatClient, WeChatClientError
 
 
@@ -37,7 +43,10 @@ def map_template_data(
     for logical_field, template_field in field_map.items():
         if logical_field not in logical_data:
             raise ValueError(f"reminder data is missing field: {logical_field}")
-        mapped[template_field] = {"value": str(logical_data[logical_field])}
+        value = str(logical_data[logical_field])
+        if template_field.startswith("thing"):
+            value = truncate_thing(value)
+        mapped[template_field] = {"value": value}
     return mapped
 
 

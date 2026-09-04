@@ -63,13 +63,12 @@ class Settings(BaseSettings):
     wechat_subscribe_page: str = "pages/review/review"
     wechat_template_field_map_json: dict[str, str] = Field(
         default_factory=lambda: {
-            "due_count": "number1",
-            "reminder_time": "time2",
+            "plan_name": "thing2",
+            "reminder_time": "time1",
             "summary": "thing3",
         },
         validation_alias=AliasChoices(
             "wechat_template_field_map_json",
-            "APP_WECHAT_TEMPLATE_FIELD_MAP_JSON",
             "WECHAT_TEMPLATE_FIELD_MAP_JSON",
         ),
     )

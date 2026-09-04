@@ -17,7 +17,7 @@ from memory_agent.models import (
     ReminderPreference,
     ReminderSubscriptionGrant,
 )
-from memory_agent.reminder_worker import ReminderDispatcher
+from memory_agent.reminder_worker import ReminderDispatcher, map_template_data
 from memory_agent.wechat import WeChatClient, WeChatClientError, WeChatSendResult
 from test_reminders import (
     FIXED_NOW,
@@ -210,8 +210,8 @@ def test_dispatcher_sends_mapped_message_and_consumes_grant_once() -> None:
     assert wechat.calls[0]["template_id"] == TEMPLATE_ID
     assert wechat.calls[0]["page"] == "pages/review/review"
     assert wechat.calls[0]["data"] == {
-        "number1": {"value": "2"},
-        "time2": {"value": "2026-08-13 12:00"},
+        "thing2": {"value": "今日知识复习"},
+        "time1": {"value": "2026-08-13 12:00"},
         "thing3": {"value": "今天有 2 个知识点建议复习"},
     }
     with SessionLocal() as session:
@@ -224,6 +224,15 @@ def test_dispatcher_sends_mapped_message_and_consumes_grant_once() -> None:
         persisted_grant = session.get(ReminderSubscriptionGrant, grant.id)
         assert persisted_grant is not None
         assert persisted_grant.status == "consumed"
+
+
+def test_thing_fields_are_truncated_to_wechat_limit() -> None:
+    mapped = map_template_data(
+        {"plan_name": "今日知识复习" * 5, "summary": "今天有很多知识点建议复习" * 3},
+        {"plan_name": "thing2", "summary": "thing3"},
+    )
+    assert all(len(item["value"]) <= 20 for item in mapped.values())
+    assert all(item["value"].endswith("…") for item in mapped.values())
 
 
 def test_dispatcher_preserves_delivery_error_grant_semantics() -> None:

@@ -22,6 +22,9 @@ from memory_agent.models import (
 
 ACCEPTED_RESULTS = {"accept", "acceptWithAudio"}
 
+PLAN_NAME = "今日知识复习"
+THING_MAX_CHARS = 20
+
 
 def record_subscription_result(
     session: Session,
@@ -212,9 +215,12 @@ def claim_due_reminders(
                 "template_id": delivery.template_id,
                 "page": settings.wechat_subscribe_page,
                 "data": {
+                    "plan_name": PLAN_NAME,
                     "due_count": str(delivery.due_count),
                     "reminder_time": local_now.strftime("%Y-%m-%d %H:%M"),
-                    "summary": f"今天有 {delivery.due_count} 个知识点建议复习",
+                    "summary": truncate_thing(
+                        f"今天有 {delivery.due_count} 个知识点建议复习"
+                    ),
                 },
             }
         )
@@ -260,3 +266,8 @@ def _as_utc(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=UTC)
     return value.astimezone(UTC)
+
+
+def truncate_thing(value: str, *, max_chars: int = THING_MAX_CHARS) -> str:
+    """WeChat ``thing`` type fields accept at most 20 Chinese characters."""
+    return value if len(value) <= max_chars else value[: max_chars - 1] + "…"

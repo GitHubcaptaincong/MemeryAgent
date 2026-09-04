@@ -78,6 +78,24 @@ def test_wechat_template_map_supports_unprefixed_server_env(
     }
 
 
+def test_wechat_template_map_uses_only_canonical_unprefixed_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "WECHAT_TEMPLATE_FIELD_MAP_JSON",
+        '{"plan_name":"thing2","reminder_time":"time1","summary":"thing3"}',
+    )
+    monkeypatch.setenv("APP_WECHAT_TEMPLATE_FIELD_MAP_JSON", '{"summary":"thing9"}')
+
+    settings = Settings()
+
+    assert settings.wechat_template_field_map == {
+        "plan_name": "thing2",
+        "reminder_time": "time1",
+        "summary": "thing3",
+    }
+
+
 def test_reminder_delivery_ready_requires_all_credentials() -> None:
     partial = Settings(
         reminder_delivery_enabled=True,

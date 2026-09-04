@@ -1,6 +1,29 @@
 const api = require('../../utils/api')
 const { idempotencyKey } = require('../../utils/ids')
 
+const SUBSCRIPTION_RESULT_MESSAGES = {
+  accept: {
+    type: 'success',
+    message: '已获得一次提醒授权。',
+  },
+  acceptWithAudio: {
+    type: 'success',
+    message: '已获得一次提醒授权。',
+  },
+  reject: {
+    type: 'warning',
+    message: '这次没有授权提醒。',
+  },
+  ban: {
+    type: 'warning',
+    message: '订阅消息已被关闭，请到小程序设置中开启。',
+  },
+  filter: {
+    type: 'warning',
+    message: '微信过滤了这次订阅授权，可稍后重试。',
+  },
+}
+
 function sentAtLabel(value) {
   if (!value) return ''
   const date = new Date(value)
@@ -46,6 +69,9 @@ Page({
       last_sent_label: '',
     },
     subscriptionStatusAvailable: true,
+    subscriptionStatusError: '',
+    subscriptionFeedback: '',
+    subscriptionFeedbackType: 'info',
     subscriptionAuthorizationEnabled: false,
   },
 
@@ -78,9 +104,17 @@ Page({
         form: { ...form, timezone },
         subscription: { ...subscription, last_sent_label: sentAtLabel(subscription.last_sent_at) },
         subscriptionStatusAvailable,
+        subscriptionStatusError: subscriptionStatusAvailable ? '' : subscriptionResult.error.message,
+        subscriptionAuthorizationEnabled: subscriptionStatusAvailable && Boolean(subscription.template_id),
       })
     } catch (error) {
-      this.setData({ loading: false, error: error.message })
+      this.setData({
+        loading: false,
+        error: error.message,
+        subscriptionStatusAvailable: false,
+        subscriptionStatusError: error.message,
+        subscriptionAuthorizationEnabled: false,
+      })
     }
   },
 
@@ -131,43 +165,80 @@ Page({
 
   requestSubscription() {
     if (this.data.subscribing) return
+    if (!this.data.subscriptionStatusAvailable) {
+      this.setData({
+        error: this.data.subscriptionStatusError || '订阅状态读取失败，请重新进入或下拉刷新。',
+      })
+      return
+    }
     const templateId = this.data.subscription.template_id
     if (!templateId) {
       this.setData({ error: '服务端尚未配置微信订阅消息模板 ID。' })
       return
     }
+    if (typeof wx === 'undefined' || typeof wx.requestSubscribeMessage !== 'function') {
+      this.setData({ error: '当前微信基础库不支持订阅消息授权。' })
+      return
+    }
     this.setData({ subscribing: true, error: '' })
     // This call must remain directly inside the tap handler; WeChat requires a user gesture.
-    wx.requestSubscribeMessage({
-      tmplIds: [templateId],
-      success: async (result) => {
-        const decision = result[templateId]
-        if (!decision || decision === 'requestSubscribeMessage:ok') {
-          this.setData({ subscribing: false, error: '没有收到有效的授权结果，请重试。' })
-          return
-        }
-        try {
-          const subscription = await api.post('/reminders/subscription-grants', {
-            template_id: templateId,
-            result: decision,
-            idempotency_key: idempotencyKey('mini-subscribe'),
-          })
+    try {
+      wx.requestSubscribeMessage({
+        tmplIds: [templateId],
+        success: async (result) => {
+          const decision = result[templateId]
+          const resultFeedback = SUBSCRIPTION_RESULT_MESSAGES[decision]
+          if (!resultFeedback) {
+            this.setData({
+              subscribing: false,
+              error: '没有收到有效的授权结果，请重试。',
+              subscriptionFeedback: '微信未返回可提交的授权结果。',
+              subscriptionFeedbackType: 'error',
+            })
+            return
+          }
+          try {
+            const subscription = await api.post('/reminders/subscription-grants', {
+              template_id: templateId,
+              result: decision,
+              idempotency_key: idempotencyKey('mini-subscribe'),
+            })
+            this.setData({
+              subscribing: false,
+              subscription: { ...subscription, last_sent_label: sentAtLabel(subscription.last_sent_at) },
+              subscriptionAuthorizationEnabled: Boolean(subscription.template_id),
+              subscriptionFeedback: resultFeedback.message,
+              subscriptionFeedbackType: resultFeedback.type,
+              error: '',
+            })
+            if (decision === 'accept' || decision === 'acceptWithAudio') {
+              wx.showToast({ title: '已获得一次提醒授权', icon: 'success' })
+            }
+          } catch (error) {
+            this.setData({
+              subscribing: false,
+              error: error.message,
+              subscriptionFeedback: '授权结果提交失败，请稍后重试。',
+              subscriptionFeedbackType: 'error',
+            })
+          }
+        },
+        fail: (error) => {
           this.setData({
             subscribing: false,
-            subscription: { ...subscription, last_sent_label: sentAtLabel(subscription.last_sent_at) },
+            error: error.message,
+            subscriptionFeedback: '微信订阅授权请求失败，请稍后重试。',
+            subscriptionFeedbackType: 'error',
           })
-          if (decision === 'accept' || decision === 'acceptWithAudio') {
-            wx.showToast({ title: '已获得一次提醒授权', icon: 'success' })
-          } else {
-            this.setData({ error: decision === 'ban' ? '订阅消息已被关闭，请到小程序设置中开启。' : '这次没有授权提醒。' })
-          }
-        } catch (error) {
-          this.setData({ subscribing: false, error: error.message })
-        }
-      },
-      fail: (error) => {
-        this.setData({ subscribing: false, error: error.errMsg || '请求订阅授权失败' })
-      },
-    })
+        },
+      })
+    } catch (error) {
+      this.setData({
+        subscribing: false,
+        error: error.message || '请求订阅授权失败',
+        subscriptionFeedback: '微信订阅授权请求失败，请稍后重试。',
+        subscriptionFeedbackType: 'error',
+      })
+    }
   },
 })
