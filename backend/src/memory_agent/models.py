@@ -545,6 +545,24 @@ class ReminderSubscriptionGrant(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
+class CardReminder(Base):
+    __tablename__ = "card_reminders"
+    __table_args__ = (
+        Index("ix_card_reminders_user_status_scheduled", "user_id", "status", "scheduled_for"),
+        Index("ix_card_reminders_card_status_scheduled", "review_card_id", "status", "scheduled_for"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    review_card_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("review_cards.id", ondelete="CASCADE"), nullable=False)
+    scheduled_for: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), default="scheduled", nullable=False)
+    attempt_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+
 class ReminderDelivery(Base):
     __tablename__ = "reminder_deliveries"
     __table_args__ = (
@@ -566,7 +584,11 @@ class ReminderDelivery(Base):
         ForeignKey("reminder_subscription_grants.id", ondelete="SET NULL"),
     )
     template_id: Mapped[str] = mapped_column(String(128), nullable=False)
-    local_date: Mapped[str] = mapped_column(String(10), nullable=False)
+    local_date: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    reminder_type: Mapped[str] = mapped_column(String(16), default="daily", nullable=False)
+    card_reminder_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("card_reminders.id", ondelete="CASCADE")
+    )
     scheduled_for: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     due_count: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[str] = mapped_column(String(32), default="sending", nullable=False)

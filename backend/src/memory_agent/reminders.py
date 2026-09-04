@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, time, timedelta
 from typing import Any
 from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -12,6 +12,8 @@ from sqlalchemy.orm import Session
 from memory_agent.config import Settings
 from memory_agent.models import (
     ReminderDelivery,
+    CardReminder,
+    ReviewEvent,
     ReminderPreference,
     ReminderSubscriptionGrant,
     ReviewCard,
@@ -34,6 +36,31 @@ def build_reminder_logical_data(*, due_count: int, reminder_time: str) -> dict[s
         "reminder_time": reminder_time,
         "summary": truncate_thing(f"今天有 {due_count} 个知识点建议复习"),
     }
+
+
+def user_has_reviewed_today(
+    session: Session, *, user_id: UUID, timezone_name: str, now: datetime
+) -> bool:
+    """Return whether a completed rating occurred in the user's local day."""
+    try:
+        timezone = ZoneInfo(timezone_name)
+    except ZoneInfoNotFoundError:
+        return False
+    local_now = now.astimezone(timezone)
+    local_start = datetime.combine(local_now.date(), time.min, tzinfo=timezone)
+    local_next_start = datetime.combine(
+        local_now.date() + timedelta(days=1), time.min, tzinfo=timezone
+    )
+    start_utc = local_start.astimezone(UTC)
+    next_start_utc = local_next_start.astimezone(UTC)
+    return session.scalar(
+        select(ReviewEvent.id).where(
+            ReviewEvent.user_id == user_id,
+            ReviewEvent.event_type == "review_rated",
+            ReviewEvent.created_at >= start_utc,
+            ReviewEvent.created_at < next_start_utc,
+        ).limit(1)
+    ) is not None
 
 
 def record_subscription_result(
@@ -140,6 +167,13 @@ def claim_due_reminders(
             continue
         if local_now.strftime("%H:%M") < preference.preferred_time:
             continue
+        if user_has_reviewed_today(
+            session,
+            user_id=preference.user_id,
+            timezone_name=preference.timezone,
+            now=current,
+        ):
+            continue
         local_date = local_now.date().isoformat()
         existing = session.scalar(
             select(ReminderDelivery).where(
@@ -157,7 +191,28 @@ def claim_due_reminders(
                 existing.status = "uncertain"
                 existing.error_code = "dispatch_result_missing"
                 existing.last_attempt_at = current
-            continue
+            if existing.status != "failed":
+                continue
+            retry_delays = (60, 300, 1800)
+            if existing.attempt_count >= len(retry_delays):
+                continue
+            if existing.last_attempt_at and _as_utc(existing.last_attempt_at) > current - timedelta(seconds=retry_delays[existing.attempt_count - 1]):
+                continue
+            grant = session.scalar(
+                select(ReminderSubscriptionGrant).where(
+                    ReminderSubscriptionGrant.user_id == preference.user_id,
+                    ReminderSubscriptionGrant.template_id == settings.wechat_subscribe_template_id,
+                    ReminderSubscriptionGrant.status == "available",
+                ).order_by(ReminderSubscriptionGrant.created_at).limit(1).with_for_update(skip_locked=True)
+            )
+            if grant is None:
+                continue
+            grant.status = "reserved"
+            delivery = existing
+            delivery.grant_id = grant.id
+            delivery.status = "sending"
+            delivery.attempt_count += 1
+            delivery.last_attempt_at = current
         else:
             due_filters = [
                 ReviewCard.user_id == preference.user_id,
@@ -200,6 +255,8 @@ def claim_due_reminders(
                 scheduled_for=current,
                 due_count=min(due_count, preference.daily_limit),
                 status="sending",
+                reminder_type="daily",
+                attempt_count=1,
                 last_attempt_at=current,
             )
             session.add(delivery)
@@ -232,6 +289,81 @@ def claim_due_reminders(
         )
     session.commit()
     return jobs
+
+
+def claim_due_card_reminders(
+    session: Session, *, settings: Settings, batch_size: int,
+    now: datetime | None = None,
+) -> list[dict[str, Any]]:
+    if not settings.reminder_delivery_ready:
+        return []
+    current = now or datetime.now(UTC)
+    rows = session.scalars(
+        select(CardReminder).where(
+            CardReminder.status == "scheduled", CardReminder.scheduled_for <= current
+        ).with_for_update(skip_locked=True).limit(batch_size)
+    ).all()
+    jobs: list[dict[str, Any]] = []
+    for reminder in rows:
+        card = session.get(ReviewCard, reminder.review_card_id)
+        identity = session.scalar(select(WechatIdentity).where(WechatIdentity.user_id == reminder.user_id))
+        grant = session.scalar(select(ReminderSubscriptionGrant).where(
+            ReminderSubscriptionGrant.user_id == reminder.user_id,
+            ReminderSubscriptionGrant.template_id == settings.wechat_subscribe_template_id,
+            ReminderSubscriptionGrant.status == "available",
+        ).order_by(ReminderSubscriptionGrant.created_at).limit(1).with_for_update(skip_locked=True))
+        if card is None or card.user_id != reminder.user_id or identity is None or grant is None:
+            continue
+        reminder.status = "sending"
+        reminder.attempt_count += 1
+        reminder.last_attempt_at = current
+        grant.status = "reserved"
+        delivery = ReminderDelivery(
+            user_id=reminder.user_id, grant_id=grant.id,
+            template_id=settings.wechat_subscribe_template_id,
+            local_date=None, reminder_type="card", card_reminder_id=reminder.id,
+            scheduled_for=reminder.scheduled_for, due_count=1,
+            status="sending", attempt_count=reminder.attempt_count,
+            last_attempt_at=current,
+        )
+        session.add(delivery)
+        session.flush()
+        jobs.append({
+            "id": str(delivery.id), "user_id": str(reminder.user_id),
+            "openid": identity.openid, "template_id": delivery.template_id,
+            "page": settings.wechat_subscribe_page,
+            "data": {
+                "plan_name": "知识点复习",
+                "reminder_time": reminder.scheduled_for.strftime("%Y-%m-%d %H:%M"),
+                "summary": truncate_thing(f"复习：{card.draft_unit.title}"),
+            },
+            "card_reminder_id": str(reminder.id),
+        })
+    session.commit()
+    return jobs
+
+
+def record_card_reminder_result(session: Session, *, delivery_id: UUID, result_status: str,
+                                wechat_errcode: int | None, wechat_errmsg: str | None) -> ReminderDelivery:
+    delivery = session.scalar(select(ReminderDelivery).where(ReminderDelivery.id == delivery_id).with_for_update())
+    if delivery is None:
+        raise LookupError("reminder delivery not found")
+    delivery.status = result_status
+    delivery.response_code = wechat_errcode
+    delivery.error_code = wechat_errmsg[:100] if wechat_errmsg else None
+    delivery.last_attempt_at = utc_now()
+    reminder = session.get(CardReminder, delivery.card_reminder_id)
+    grant = session.get(ReminderSubscriptionGrant, delivery.grant_id) if delivery.grant_id else None
+    if reminder is not None:
+        reminder.status = result_status
+    if result_status == "sent":
+        delivery.sent_at = utc_now()
+        if grant is not None:
+            grant.status = "consumed"; grant.consumed_at = delivery.sent_at
+    elif result_status == "failed" and grant is not None:
+        grant.status = "available"
+    session.commit()
+    return delivery
 
 
 def record_delivery_result(

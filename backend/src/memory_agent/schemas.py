@@ -353,6 +353,17 @@ class ReminderPreferenceUpdate(ApiModel):
 class ReminderPreferenceRead(ReminderPreferenceUpdate):
     id: UUID
     user_id: UUID
+
+
+class CardReminderCreate(ApiModel):
+    delay_seconds: Literal[60, 600, 3600, 86400]
+
+
+class CardReminderRead(ApiModel):
+    reminder_id: UUID
+    review_card_id: UUID
+    scheduled_for: datetime
+    status: Literal["scheduled", "sending", "sent", "failed", "uncertain", "cancelled"]
     created_at: datetime
     updated_at: datetime
 

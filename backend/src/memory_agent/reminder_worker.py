@@ -14,6 +14,8 @@ from memory_agent.reminders import (
     PLAN_NAME,
     THING_MAX_CHARS,
     claim_due_reminders,
+    claim_due_card_reminders,
+    record_card_reminder_result,
     record_delivery_result,
     truncate_thing,
 )
@@ -80,14 +82,18 @@ class ReminderDispatcher:
             logger.debug("reminder delivery is disabled or not fully configured")
             return 0
 
-        with self.session_factory() as session:
-            jobs = claim_due_reminders(
-                session,
-                settings=self.settings,
-                batch_size=self.settings.reminder_batch_size,
-                lease_seconds=self.settings.reminder_lease_seconds,
-                now=current,
-            )
+        try:
+            with self.session_factory() as session:
+                jobs = claim_due_reminders(
+                    session,
+                    settings=self.settings,
+                    batch_size=self.settings.reminder_batch_size,
+                    lease_seconds=self.settings.reminder_lease_seconds,
+                    now=current,
+                )
+        except Exception:
+            logger.exception("daily reminder claim failed")
+            jobs = []
         logger.info("due reminders claimed", extra={"count": len(jobs)})
 
         for job in jobs:
@@ -115,7 +121,24 @@ class ReminderDispatcher:
                     "reminder delivery result database update failed",
                     extra={"delivery_id": delivery_id, "wechat_errcode": result.errcode},
                 )
-        return len(jobs)
+        try:
+            with self.session_factory() as session:
+                card_jobs = claim_due_card_reminders(
+                    session, settings=self.settings,
+                    batch_size=self.settings.reminder_batch_size, now=current,
+                )
+            logger.info("due card reminders claimed", extra={"count": len(card_jobs)})
+            for job in card_jobs:
+                result = await self._send_one(job)
+                with self.session_factory() as session:
+                    record_card_reminder_result(
+                        session, delivery_id=UUID(str(job["id"])),
+                        result_status=result.status, wechat_errcode=result.errcode,
+                        wechat_errmsg=result.errmsg,
+                    )
+        except Exception:
+            logger.exception("card reminder tick failed")
+        return len(jobs) + len(card_jobs)
 
     async def run_until_stopped(self, stop_event: threading.Event) -> None:
         logger.info(

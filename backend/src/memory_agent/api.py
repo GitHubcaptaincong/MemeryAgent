@@ -4,7 +4,7 @@ import asyncio
 import hashlib
 import json
 from collections.abc import AsyncIterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from urllib.parse import urlsplit
 from uuid import UUID
 
@@ -28,6 +28,8 @@ from memory_agent.models import (
     RunState,
     Source,
     TERMINAL_RUN_STATES,
+    ReviewCard,
+    CardReminder,
 )
 from memory_agent.knowledge import (
     archive_knowledge_set,
@@ -66,6 +68,8 @@ from memory_agent.schemas import (
     KnowledgeSetSummaryRead,
     KnowledgeSetUpdate,
     KnowledgeUnitUpdate,
+    CardReminderCreate,
+    CardReminderRead,
     ReminderPreferenceRead,
     ReminderPreferenceUpdate,
     ReminderSubscriptionGrantCreate,
@@ -555,6 +559,30 @@ def post_review_rating(
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return ReviewResultRead.model_validate(result)
+
+
+@router.post("/review/cards/{card_id}/reminders", response_model=CardReminderRead, status_code=status.HTTP_201_CREATED)
+def create_card_reminder(card_id: UUID, data: CardReminderCreate, session: Session = Depends(get_session), identity: IdentityContext = Depends(get_current_identity)) -> CardReminderRead:
+    card = session.scalar(select(ReviewCard).where(ReviewCard.id == card_id, ReviewCard.user_id == identity.user.id))
+    if card is None:
+        raise HTTPException(status_code=404, detail="review card not found")
+    reminder = CardReminder(user_id=identity.user.id, review_card_id=card.id, scheduled_for=datetime.now(UTC) + timedelta(seconds=data.delay_seconds))
+    session.add(reminder)
+    session.commit()
+    session.refresh(reminder)
+    return CardReminderRead(reminder_id=reminder.id, review_card_id=reminder.review_card_id, scheduled_for=reminder.scheduled_for, status=reminder.status)
+
+
+@router.delete("/review/cards/{card_id}/reminders/{reminder_id}", response_model=CardReminderRead)
+def cancel_card_reminder(card_id: UUID, reminder_id: UUID, session: Session = Depends(get_session), identity: IdentityContext = Depends(get_current_identity)) -> CardReminderRead:
+    reminder = session.scalar(select(CardReminder).where(CardReminder.id == reminder_id, CardReminder.review_card_id == card_id, CardReminder.user_id == identity.user.id))
+    if reminder is None:
+        raise HTTPException(status_code=404, detail="card reminder not found")
+    if reminder.status != "scheduled":
+        raise HTTPException(status_code=409, detail="only scheduled reminders can be cancelled")
+    reminder.status = "cancelled"
+    session.commit()
+    return CardReminderRead(reminder_id=reminder.id, review_card_id=reminder.review_card_id, scheduled_for=reminder.scheduled_for, status=reminder.status)
 
 
 @router.get("/reminders/preferences", response_model=ReminderPreferenceRead)

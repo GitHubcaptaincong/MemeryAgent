@@ -17,6 +17,7 @@ from memory_agent.models import (
     ReminderPreference,
     ReminderSubscriptionGrant,
     ReviewCard,
+    ReviewEvent,
     Source,
     User,
     WechatIdentity,
@@ -26,6 +27,7 @@ from memory_agent.reminders import (
     claim_due_reminders,
     record_delivery_result,
     record_subscription_result,
+    user_has_reviewed_today,
 )
 
 
@@ -247,6 +249,20 @@ def test_claim_reserves_grant_and_applies_daily_limit() -> None:
         assert delivery.grant_id == grant.id
         assert delivery.status == "sending"
         assert delivery.due_count == 2
+
+
+def test_daily_reminder_skips_user_who_reviewed_today() -> None:
+    with SessionLocal() as session:
+        user_id, _ = _seed_user(session, label="reviewed-today", due_cards=2)
+        _record_grant(session, user_id, "reviewed-today-grant")
+        session.add(ReviewEvent(
+            user_id=user_id, card_id=session.scalar(select(ReviewCard).where(ReviewCard.user_id == user_id)).id,
+            correlation_id=uuid4(), event_type="review_rated",
+            idempotency_key="reviewed-today-event", payload_json={}, created_at=FIXED_NOW,
+        ))
+        session.commit()
+        assert claim_due_reminders(session, settings=_settings(), batch_size=10, lease_seconds=120, now=FIXED_NOW) == []
+        assert user_has_reviewed_today(session, user_id=user_id, timezone_name="UTC", now=FIXED_NOW)
 
 
 def test_reminder_logical_data_contains_plan_name() -> None:
