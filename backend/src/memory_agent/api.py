@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from urllib.parse import urlsplit
@@ -113,6 +114,7 @@ import secrets
 
 router = APIRouter(prefix="/api/v1")
 internal_router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 class DebugWechatReminderRequest(BaseModel):
@@ -563,13 +565,21 @@ def post_review_rating(
 
 @router.post("/review/cards/{card_id}/reminders", response_model=CardReminderRead, status_code=status.HTTP_201_CREATED)
 def create_card_reminder(card_id: UUID, data: CardReminderCreate, session: Session = Depends(get_session), identity: IdentityContext = Depends(get_current_identity)) -> CardReminderRead:
+    logger.info("card_reminder.create.start", extra={"user_id": str(identity.user.id), "card_id": str(card_id), "delay_seconds": data.delay_seconds})
     card = session.scalar(select(ReviewCard).where(ReviewCard.id == card_id, ReviewCard.user_id == identity.user.id))
     if card is None:
+        logger.warning("card_reminder.create.card_not_found", extra={"user_id": str(identity.user.id), "card_id": str(card_id)})
         raise HTTPException(status_code=404, detail="review card not found")
-    reminder = CardReminder(user_id=identity.user.id, review_card_id=card.id, scheduled_for=datetime.now(UTC) + timedelta(seconds=data.delay_seconds))
-    session.add(reminder)
-    session.commit()
-    session.refresh(reminder)
+    try:
+        reminder = CardReminder(user_id=identity.user.id, review_card_id=card.id, scheduled_for=datetime.now(UTC) + timedelta(seconds=data.delay_seconds))
+        session.add(reminder)
+        session.commit()
+        session.refresh(reminder)
+    except Exception:
+        session.rollback()
+        logger.exception("card_reminder.create.failed", extra={"user_id": str(identity.user.id), "card_id": str(card_id)})
+        raise
+    logger.info("card_reminder.created", extra={"user_id": str(identity.user.id), "card_id": str(card.id), "card_reminder_id": str(reminder.id), "scheduled_for": reminder.scheduled_for.isoformat(), "delay_seconds": data.delay_seconds, "status": reminder.status})
     return CardReminderRead(reminder_id=reminder.id, review_card_id=reminder.review_card_id, scheduled_for=reminder.scheduled_for, status=reminder.status)
 
 
@@ -582,6 +592,7 @@ def cancel_card_reminder(card_id: UUID, reminder_id: UUID, session: Session = De
         raise HTTPException(status_code=409, detail="only scheduled reminders can be cancelled")
     reminder.status = "cancelled"
     session.commit()
+    logger.info("card_reminder.status_changed", extra={"user_id": str(identity.user.id), "card_id": str(card_id), "card_reminder_id": str(reminder.id), "old_status": "scheduled", "new_status": "cancelled", "reason": "user_cancelled"})
     return CardReminderRead(reminder_id=reminder.id, review_card_id=reminder.review_card_id, scheduled_for=reminder.scheduled_for, status=reminder.status)
 
 

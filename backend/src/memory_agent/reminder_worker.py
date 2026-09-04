@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import threading
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Callable
@@ -74,6 +75,8 @@ class ReminderDispatcher:
         )
 
     async def dispatch_once(self, *, now: datetime | None = None) -> int:
+        tick_started = time.perf_counter()
+        logger.debug("reminder_worker.tick.start")
         current = now or utc_now()
         if current.tzinfo is None:
             current = current.replace(tzinfo=UTC)
@@ -138,11 +141,13 @@ class ReminderDispatcher:
                     )
         except Exception:
             logger.exception("card reminder tick failed")
-        return len(jobs) + len(card_jobs)
+        total = len(jobs) + len(card_jobs)
+        logger.debug("reminder_worker.tick.finish", extra={"duration_ms": round((time.perf_counter() - tick_started) * 1000, 1), "daily_claimed_count": len(jobs), "card_claimed_count": len(card_jobs)})
+        return total
 
     async def run_until_stopped(self, stop_event: threading.Event) -> None:
         logger.info(
-            "reminder worker started",
+            "reminder_worker.started",
             extra={
                 "interval_seconds": self.settings.reminder_worker_interval_seconds,
                 "enabled": self.settings.reminder_delivery_enabled,
@@ -174,9 +179,14 @@ class ReminderDispatcher:
                 raise ValueError("claimed reminder is missing openid")
             if not template_id:
                 raise ValueError("claimed reminder is missing template_id")
-            data = map_template_data(
-                job.get("data") or {}, self.settings.wechat_template_field_map
-            )
+            try:
+                data = map_template_data(
+                    job.get("data") or {}, self.settings.wechat_template_field_map
+                )
+            except Exception:
+                logger.exception("wechat_reminder.payload_mapping_failed", extra={"card_reminder_id": job.get("card_reminder_id"), "delivery_id": delivery_id, "user_id": job.get("user_id"), "grant_id": job.get("grant_id")})
+                raise
+            logger.info("wechat_reminder.send.start", extra={"card_reminder_id": job.get("card_reminder_id"), "delivery_id": delivery_id, "user_id": job.get("user_id"), "grant_id": job.get("grant_id"), "template_id": template_id, "openid_present": bool(openid), "payload_keys": list(data), "payload_lengths": {key: len(value["value"]) for key, value in data.items()}})
             logger.info(
                 "reminder delivery started",
                 extra={
@@ -193,11 +203,17 @@ class ReminderDispatcher:
                 data,
             )
             if result.errcode is None:
+                logger.warning("wechat_reminder.send.uncertain", extra={"card_reminder_id": job.get("card_reminder_id"), "delivery_id": delivery_id, "user_id": job.get("user_id"), "template_id": template_id, "result": "uncertain"})
                 return _DeliveryResult(
                     status="uncertain",
                     errcode=None,
                     errmsg="WeChat send response did not contain errcode",
                 )
+            logger.info("wechat_reminder.api.response", extra={"card_reminder_id": job.get("card_reminder_id"), "delivery_id": delivery_id, "user_id": job.get("user_id"), "template_id": template_id, "http_status": 200, "errcode": result.errcode, "errmsg": result.errmsg})
+            if result.errcode == 0:
+                logger.info("wechat_reminder.send.succeeded", extra={"card_reminder_id": job.get("card_reminder_id"), "delivery_id": delivery_id, "user_id": job.get("user_id")})
+            else:
+                logger.warning("wechat_reminder.send.failed", extra={"card_reminder_id": job.get("card_reminder_id"), "delivery_id": delivery_id, "user_id": job.get("user_id"), "errcode": result.errcode, "errmsg": result.errmsg, "http_status": 200})
             return _DeliveryResult(
                 status="sent" if result.errcode == 0 else "failed",
                 errcode=result.errcode,

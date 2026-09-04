@@ -551,6 +551,21 @@
   margin: 0 8rpx 18rpx;
 }
 
+.reminder-prompt {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20rpx;
+  margin: 18rpx 0;
+  padding: 22rpx 24rpx;
+}
+
+.reminder-prompt > view text { display: block; color: #8e8e93; font-size: 22rpx; }
+.reminder-prompt .reminder-prompt__title { margin-bottom: 6rpx; color: #1c1c1e; font-size: 26rpx; font-weight: 650; }
+.reminder-prompt__action { flex: none; margin: 0; padding: 8rpx 0; border: 0; background: transparent; color: #007aff; font-size: 24rpx; }
+.reminder-prompt__action::after { border: 0; }
+.reminder-prompt--active { border: 1rpx solid #b7d7ff; background: #f5faff; }
+
 .rating-intro text {
   display: block;
 }

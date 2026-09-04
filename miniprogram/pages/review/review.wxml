@@ -12,6 +12,14 @@
 
   <view wx:if="{{error}}" class="error-banner">{{error}}</view>
   <view wx:if="{{lastScheduleText}}" class="success-banner">✓ {{lastScheduleText}}</view>
+  <view wx:if="{{completedCard && !cardReminder}}" class="ios-card reminder-prompt">
+    <view><text class="reminder-prompt__title">已完成：{{completedCard.title}}</text><text>需要稍后再复习一次吗？</text></view>
+    <button class="reminder-prompt__action" disabled="{{reminderBusy}}" bindtap="showCardReminderOptions">稍后提醒我 ›</button>
+  </view>
+  <view wx:if="{{cardReminder}}" class="ios-card reminder-prompt reminder-prompt--active">
+    <view><text class="reminder-prompt__title">已设置{{cardReminder.label}}提醒</text><text>{{completedCard.title}}</text></view>
+    <button class="reminder-prompt__action" disabled="{{reminderBusy}}" bindtap="cancelCardReminder">取消提醒</button>
+  </view>
 
   <view wx:if="{{!loading && !planAvailable}}" class="ios-card plan-card">
     <view class="plan-card__top">

@@ -86,6 +86,13 @@ function plannedQueueFor(allQueue, dailyPlan) {
   return (dailyPlan.planned_cards || []).map((item) => byId.get(item.id)).filter(Boolean)
 }
 
+const reminderOptions = [
+  { label: '1分钟后', seconds: 60 },
+  { label: '10分钟后', seconds: 600 },
+  { label: '1小时后', seconds: 3600 },
+  { label: '明天', seconds: 86400 },
+]
+
 Page({
   data: {
     loading: true,
@@ -112,6 +119,9 @@ Page({
     knowledgeSets: [],
     knowledgeDetail: null,
     expandedUnitId: '',
+    completedCard: null,
+    cardReminder: null,
+    reminderBusy: false,
   },
 
   onShow() {
@@ -273,11 +283,53 @@ Page({
       this.setData({
         sessionCount: nextSessionCount,
         lastScheduleText: `已安排到 ${nextDueLabel(result.next_due_at)}`,
+        completedCard: { id: card.id, title: card.title },
+        cardReminder: null,
       })
       await this.loadReviewData()
       wx.showToast({ title: '已完成一题', icon: 'success' })
     } catch (error) {
       this.setData({ busy: false, error: error.message })
+    }
+  },
+
+  showCardReminderOptions() {
+    if (!this.data.completedCard || this.data.reminderBusy) return
+    wx.showActionSheet({
+      itemList: reminderOptions.map((item) => item.label),
+      success: ({ tapIndex }) => this.createCardReminder(reminderOptions[tapIndex]),
+    })
+  },
+
+  async createCardReminder(option) {
+    const card = this.data.completedCard
+    if (!card || !option || this.data.reminderBusy) return
+    this.setData({ reminderBusy: true, error: '' })
+    try {
+      const reminder = await api.post(`/review/cards/${card.id}/reminders`, {
+        delay_seconds: option.seconds,
+      })
+      this.setData({
+        reminderBusy: false,
+        cardReminder: { ...reminder, label: option.label },
+      })
+      wx.showToast({ title: '已设置提醒', icon: 'success' })
+    } catch (error) {
+      this.setData({ reminderBusy: false, error: '提醒设置失败，请稍后重试' })
+    }
+  },
+
+  async cancelCardReminder() {
+    const card = this.data.completedCard
+    const reminder = this.data.cardReminder
+    if (!card || !reminder || this.data.reminderBusy) return
+    this.setData({ reminderBusy: true, error: '' })
+    try {
+      await api.delete(`/review/cards/${card.id}/reminders/${reminder.reminder_id}`)
+      this.setData({ reminderBusy: false, cardReminder: null })
+      wx.showToast({ title: '提醒已取消', icon: 'success' })
+    } catch (error) {
+      this.setData({ reminderBusy: false, error: error.message || '提醒取消失败，请稍后重试' })
     }
   },
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime, time, timedelta
 from typing import Any
 from uuid import UUID
@@ -20,6 +21,8 @@ from memory_agent.models import (
     WechatIdentity,
     utc_now,
 )
+
+logger = logging.getLogger(__name__)
 
 
 ACCEPTED_RESULTS = {"accept", "acceptWithAudio"}
@@ -298,11 +301,13 @@ def claim_due_card_reminders(
     if not settings.reminder_delivery_ready:
         return []
     current = now or datetime.now(UTC)
+    scheduled_count = int(session.scalar(select(func.count(CardReminder.id)).where(CardReminder.status == "scheduled")) or 0)
     rows = session.scalars(
         select(CardReminder).where(
             CardReminder.status == "scheduled", CardReminder.scheduled_for <= current
         ).with_for_update(skip_locked=True).limit(batch_size)
     ).all()
+    logger.debug("card_reminder.claim.scan", extra={"scheduled_count": scheduled_count, "due_count": len(rows), "not_due_count": max(0, scheduled_count - len(rows)), "now": current.isoformat()})
     jobs: list[dict[str, Any]] = []
     for reminder in rows:
         card = session.get(ReviewCard, reminder.review_card_id)
@@ -312,8 +317,16 @@ def claim_due_card_reminders(
             ReminderSubscriptionGrant.template_id == settings.wechat_subscribe_template_id,
             ReminderSubscriptionGrant.status == "available",
         ).order_by(ReminderSubscriptionGrant.created_at).limit(1).with_for_update(skip_locked=True))
-        if card is None or card.user_id != reminder.user_id or identity is None or grant is None:
+        if card is None or card.user_id != reminder.user_id:
+            logger.warning("card_reminder.claim.skip", extra={"card_reminder_id": str(reminder.id), "card_id": str(reminder.review_card_id), "user_id": str(reminder.user_id), "reason": "card_not_found_or_wrong_owner"})
             continue
+        if identity is None:
+            logger.warning("card_reminder.claim.skip", extra={"card_reminder_id": str(reminder.id), "card_id": str(reminder.review_card_id), "user_id": str(reminder.user_id), "reason": "no_wechat_identity"})
+            continue
+        if grant is None:
+            logger.debug("card_reminder.claim.skip", extra={"card_reminder_id": str(reminder.id), "card_id": str(reminder.review_card_id), "user_id": str(reminder.user_id), "reason": "no_available_grant"})
+            continue
+        logger.info("card_reminder.due", extra={"card_reminder_id": str(reminder.id), "card_id": str(reminder.review_card_id), "user_id": str(reminder.user_id), "scheduled_for": reminder.scheduled_for.isoformat(), "now": current.isoformat()})
         reminder.status = "sending"
         reminder.attempt_count += 1
         reminder.last_attempt_at = current
@@ -328,8 +341,11 @@ def claim_due_card_reminders(
         )
         session.add(delivery)
         session.flush()
+        logger.info("reminder_grant.reserved", extra={"grant_id": str(grant.id), "user_id": str(reminder.user_id), "card_reminder_id": str(reminder.id), "reminder_type": "card"})
+        logger.info("reminder_delivery.created", extra={"delivery_id": str(delivery.id), "card_reminder_id": str(reminder.id), "user_id": str(reminder.user_id), "grant_id": str(grant.id), "reminder_type": "card", "status": "sending", "template_id": delivery.template_id})
         jobs.append({
             "id": str(delivery.id), "user_id": str(reminder.user_id),
+            "grant_id": str(grant.id),
             "openid": identity.openid, "template_id": delivery.template_id,
             "page": settings.wechat_subscribe_page,
             "data": {
@@ -348,6 +364,7 @@ def record_card_reminder_result(session: Session, *, delivery_id: UUID, result_s
     delivery = session.scalar(select(ReminderDelivery).where(ReminderDelivery.id == delivery_id).with_for_update())
     if delivery is None:
         raise LookupError("reminder delivery not found")
+    old_status = delivery.status
     delivery.status = result_status
     delivery.response_code = wechat_errcode
     delivery.error_code = wechat_errmsg[:100] if wechat_errmsg else None
@@ -356,12 +373,17 @@ def record_card_reminder_result(session: Session, *, delivery_id: UUID, result_s
     grant = session.get(ReminderSubscriptionGrant, delivery.grant_id) if delivery.grant_id else None
     if reminder is not None:
         reminder.status = result_status
+        logger.info("card_reminder.status_changed", extra={"card_reminder_id": str(reminder.id), "delivery_id": str(delivery.id), "grant_id": str(delivery.grant_id) if delivery.grant_id else None, "old_status": old_status, "new_status": result_status, "reason": wechat_errmsg})
     if result_status == "sent":
         delivery.sent_at = utc_now()
         if grant is not None:
             grant.status = "consumed"; grant.consumed_at = delivery.sent_at
+            logger.info("reminder_grant.consumed", extra={"grant_id": str(grant.id), "user_id": str(delivery.user_id), "card_reminder_id": str(reminder.id) if reminder else None, "reminder_type": "card"})
     elif result_status == "failed" and grant is not None:
         grant.status = "available"
+        logger.info("reminder_grant.released", extra={"grant_id": str(grant.id), "user_id": str(delivery.user_id), "card_reminder_id": str(reminder.id) if reminder else None, "reminder_type": "card"})
+    elif result_status == "uncertain" and grant is not None:
+        logger.warning("reminder_grant.uncertain", extra={"grant_id": str(grant.id), "user_id": str(delivery.user_id), "card_reminder_id": str(reminder.id) if reminder else None, "reminder_type": "card"})
     session.commit()
     return delivery
 
