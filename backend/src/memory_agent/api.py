@@ -87,6 +87,7 @@ from memory_agent.schemas import (
     RunRead,
     SourceCreate,
     SourceRead,
+    SourceDetailRead,
     SourceResolveCreate,
     SourceUrlCreate,
 )
@@ -660,6 +661,26 @@ def get_reminder_subscription_status(
     return ReminderSubscriptionStatusRead.model_validate(
         reminder_status(session, user_id=identity.user.id, settings=identity.settings)
     )
+
+
+@router.get("/sources/{source_id}", response_model=SourceDetailRead)
+def get_source(
+    source_id: UUID,
+    session: Session = Depends(get_session),
+    identity: IdentityContext = Depends(get_current_identity),
+) -> SourceDetailRead:
+    """Return the saved source snapshot used by evidence character offsets."""
+    user, _ = _identity(identity)
+    source = session.scalar(
+        select(Source).where(
+            Source.id == source_id,
+            Source.user_id == user.id,
+            Source.deleted_at.is_(None),
+        )
+    )
+    if source is None:
+        raise HTTPException(status_code=404, detail="source not found")
+    return SourceDetailRead.model_validate(source)
 
 
 @router.post("/sources", response_model=SourceRead, status_code=status.HTTP_201_CREATED)

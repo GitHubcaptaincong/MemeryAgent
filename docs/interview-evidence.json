@@ -1,0 +1,162 @@
+[
+  {
+    "evidence_id": "E01",
+    "source_id": "backend/src/memory_agent/schemas.py",
+    "start_char": 254,
+    "end_char": 272,
+    "line": 14,
+    "quote": "class SourceCreate"
+  },
+  {
+    "evidence_id": "E02",
+    "source_id": "backend/src/memory_agent/source_ingestion.py",
+    "start_char": 5965,
+    "end_char": 5987,
+    "line": 224,
+    "quote": "def resolve_public_ips"
+  },
+  {
+    "evidence_id": "E03",
+    "source_id": "backend/src/memory_agent/agent.py",
+    "start_char": 860,
+    "end_char": 878,
+    "line": 34,
+    "quote": "class AgentRuntime"
+  },
+  {
+    "evidence_id": "E04",
+    "source_id": "backend/src/memory_agent/tools.py",
+    "start_char": 870,
+    "end_char": 888,
+    "line": 43,
+    "quote": "class ToolRegistry"
+  },
+  {
+    "evidence_id": "E05",
+    "source_id": "backend/src/memory_agent/jobs.py",
+    "start_char": 7031,
+    "end_char": 7045,
+    "line": 170,
+    "quote": "def claim_next"
+  },
+  {
+    "evidence_id": "E06",
+    "source_id": "backend/src/memory_agent/services.py",
+    "start_char": 5066,
+    "end_char": 5083,
+    "line": 179,
+    "quote": "def confirm_draft"
+  },
+  {
+    "evidence_id": "E07",
+    "source_id": "backend/src/memory_agent/review.py",
+    "start_char": 11449,
+    "end_char": 11471,
+    "line": 335,
+    "quote": "def rate_review_answer"
+  },
+  {
+    "evidence_id": "E08",
+    "source_id": "backend/src/memory_agent/scheduler.py",
+    "start_char": 1110,
+    "end_char": 1135,
+    "line": 49,
+    "quote": "class FsrsReviewScheduler"
+  },
+  {
+    "evidence_id": "E09",
+    "source_id": "backend/src/memory_agent/memory.py",
+    "start_char": 578,
+    "end_char": 599,
+    "line": 31,
+    "quote": "def retrieve_memories"
+  },
+  {
+    "evidence_id": "E10",
+    "source_id": "backend/src/memory_agent/skills.py",
+    "start_char": 1935,
+    "end_char": 1944,
+    "line": 66,
+    "quote": "def route"
+  },
+  {
+    "evidence_id": "E11",
+    "source_id": "backend/tests/test_cli_proxy_adapter.py",
+    "start_char": 7230,
+    "end_char": 7289,
+    "line": 230,
+    "quote": "def test_runtime_rejects_persisted_validation_hash_mismatch"
+  },
+  {
+    "evidence_id": "E12",
+    "source_id": "backend/tests/test_cli_proxy_adapter.py",
+    "start_char": 10527,
+    "end_char": 10599,
+    "line": 321,
+    "quote": "def test_short_source_uses_one_model_call_and_normalizes_evidence_ranges"
+  },
+  {
+    "evidence_id": "E13",
+    "source_id": "backend/tests/test_job_recovery.py",
+    "start_char": 2785,
+    "end_char": 2838,
+    "line": 92,
+    "quote": "def test_claim_next_recovers_an_expired_running_lease"
+  },
+  {
+    "evidence_id": "E14",
+    "source_id": "backend/tests/test_reminders.py",
+    "start_char": 9694,
+    "end_char": 9762,
+    "line": 325,
+    "quote": "def test_expired_sending_lease_becomes_uncertain_and_is_never_resent"
+  },
+  {
+    "evidence_id": "E15",
+    "source_id": "backend/tests/test_wechat_auth.py",
+    "start_char": 1445,
+    "end_char": 1513,
+    "line": 54,
+    "quote": "def test_first_wechat_user_claims_legacy_data_and_users_are_isolated"
+  },
+  {
+    "evidence_id": "E16",
+    "source_id": "backend/src/memory_agent/agent.py",
+    "start_char": 21060,
+    "end_char": 21102,
+    "line": 541,
+    "quote": "tokens_before=max(1, len(serialized) // 4)"
+  },
+  {
+    "evidence_id": "E17",
+    "source_id": "backend/src/memory_agent/cli_proxy_adapter.py",
+    "start_char": 6180,
+    "end_char": 6230,
+    "line": 141,
+    "quote": "provider_items.extend(copy.deepcopy(output_items))"
+  },
+  {
+    "evidence_id": "E18",
+    "source_id": "backend/tests/test_api_flow.py",
+    "start_char": 691,
+    "end_char": 745,
+    "line": 31,
+    "quote": "def test_source_to_confirmed_draft_and_approved_memory"
+  },
+  {
+    "evidence_id": "E19",
+    "source_id": "backend/tests/test_source_ingestion.py",
+    "start_char": 2571,
+    "end_char": 2633,
+    "line": 83,
+    "quote": "def test_long_text_and_public_url_sources_keep_origin_evidence"
+  },
+  {
+    "evidence_id": "E20",
+    "source_id": "backend/tests/test_scheduler.py",
+    "start_char": 2886,
+    "end_char": 2952,
+    "line": 88,
+    "quote": "def test_legacy_card_with_incomplete_history_is_not_silently_reset"
+  }
+]

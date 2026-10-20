@@ -1,0 +1,12 @@
+.evidence-page { height: 100vh; display: flex; flex-direction: column; padding-bottom: env(safe-area-inset-bottom); }
+.evidence-header { flex: none; padding: 24rpx 28rpx; background: #fff; max-height: 50vh; overflow-y: auto; }
+.evidence-title { display: block; font-size: 34rpx; font-weight: 650; }
+.evidence-note { display: block; margin-top: 12rpx; font-size: 24rpx; color: #636366; line-height: 1.5; }
+.evidence-tabs { white-space: nowrap; margin-top: 20rpx; }
+.evidence-tabs button { display: inline-block; margin: 0 12rpx 0 0; font-size: 26rpx; background: #f2f2f7; }
+.evidence-tabs .selected { color: #fff; background: #007aff; }
+.selected-quote { display: block; margin-top: 20rpx; font-size: 30rpx; line-height: 1.7; color: #3a3a3c; }
+.source-link { color: #007aff; background: transparent; font-size: 26rpx; }
+.source-scroll { flex: 1; height: 0; min-height: 0; }
+.source-content { padding: 28rpx 28rpx 80rpx; white-space: pre-wrap; overflow-wrap: break-word; font-size: 32rpx; line-height: 1.9; }
+.highlight { background: #ffe69b; color: #3a2c00; }

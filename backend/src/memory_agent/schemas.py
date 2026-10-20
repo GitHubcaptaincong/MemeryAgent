@@ -49,6 +49,10 @@ class SourceRead(ApiModel):
     created_at: datetime
 
 
+class SourceDetailRead(SourceRead):
+    raw_content: str
+
+
 class RunCreate(ApiModel):
     source_id: UUID
     idempotency_key: str | None = Field(default=None, min_length=8, max_length=128)

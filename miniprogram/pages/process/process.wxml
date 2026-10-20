@@ -1,0 +1,21 @@
+<view class="page-shell">
+  <view class="process-heading"><text>整理过程</text><button bindtap="reload" disabled="{{loading}}">刷新记录</button></view>
+  <text class="process-note">以下为本次任务保存的执行记录。</text>
+  <view wx:if="{{loading}}" class="process-note">正在读取…</view>
+  <view wx:if="{{error}}" class="error-banner">{{error}}</view>
+  <block wx:if="{{run}}">
+    <text class="section-label">当前状态：{{stateLabel}}</text>
+    <view wx:if="{{run.error_message}}" class="error-banner">{{run.error_message}}</view>
+    <view class="ios-card card-padding">
+      <view wx:for="{{stages}}" wx:key="title" class="process-stage"><text>{{index + 1}}. {{item.title}}</text><text>{{item.status}}</text></view>
+    </view>
+    <button class="ios-button ios-button--plain" bindtap="toggleEvents">{{expanded ? '收起具体事件' : '展开具体事件'}}（{{events.length}}）</button>
+    <text wx:if="{{!events.length}}" class="process-note">暂未保存可展示的事件。</text>
+    <view wx:if="{{expanded}}" class="ios-card card-padding event-list">
+      <view wx:for="{{events}}" wx:key="id" class="history-event">
+        <view><text>{{item.seq}} · {{item.label}}</text><text>{{item.clock}}</text></view>
+        <text wx:for="{{item.details}}" wx:key="*this" wx:for-item="detail" class="event-detail">{{detail}}</text>
+      </view>
+    </view>
+  </block>
+</view>

@@ -1,5 +1,6 @@
 const api = require('../../utils/api')
 const { idempotencyKey } = require('../../utils/ids')
+const { openEvidence } = require('../../utils/evidence')
 
 function nextDueLabel(value) {
   if (!value) return '暂未安排'
@@ -97,6 +98,7 @@ Page({
   data: {
     loading: true,
     busy: false,
+    syncing: false,
     queue: [],
     allQueue: [],
     showAllDue: false,
@@ -113,6 +115,7 @@ Page({
     dailyPlan: decorateDailyPlan(null),
     planAvailable: true,
     evaluationWaitingLong: false,
+    evaluationExpanded: false,
     ratings: ratingsFor(null),
     section: 'practice',
     activeKnowledgeSetId: '',
@@ -125,14 +128,23 @@ Page({
   },
 
   onShow() {
+    this._hidden = false
     const tabBar = typeof this.getTabBar === 'function' && this.getTabBar()
     if (tabBar) tabBar.setData({ selected: 1 })
+    if (this.data.busy) return
+    const practiceSetId = wx.getStorageSync('memoryAgentPracticeSetId')
+    if (practiceSetId) {
+      wx.removeStorageSync('memoryAgentPracticeSetId')
+      this.setData({ section: 'practice', activeKnowledgeSetId: practiceSetId, showAllDue: true })
+      this.loadReviewData()
+      return
+    }
     const knowledgeSetId = wx.getStorageSync('memoryAgentKnowledgeSetId')
     if (knowledgeSetId) {
       wx.removeStorageSync('memoryAgentKnowledgeSetId')
       this.openKnowledgeSetById(knowledgeSetId)
-    } else {
-      this.loadReviewData()
+    } else if (this.data.section === 'practice') {
+      this.loadReviewData({ silent: Boolean(this.data.queue.length || this.data.activeCard) })
     }
   },
 
@@ -141,15 +153,23 @@ Page({
   },
 
   onHide() {
+    this._hidden = true
+    this.saveCardState()
     this.stopEvaluationPolling()
   },
 
   onUnload() {
+    this._unloaded = true
+    this._loadId = (this._loadId || 0) + 1
     this.stopEvaluationPolling()
   },
 
-  async loadReviewData() {
-    this.setData({ loading: true, error: '' })
+  async loadReviewData({ silent = false } = {}) {
+    if (this.data.busy) return
+    this.saveCardState()
+    const loadId = this._loadId = (this._loadId || 0) + 1
+    this._loadingData = true
+    this.setData({ loading: !silent, syncing: true, error: '' })
     try {
       const setQuery = this.data.activeKnowledgeSetId
         ? `&knowledge_set_id=${encodeURIComponent(this.data.activeKnowledgeSetId)}`
@@ -162,6 +182,7 @@ Page({
           .then((value) => ({ value }))
           .catch((error) => ({ error })),
       ])
+      if (loadId !== this._loadId || this._unloaded) return
       const planAvailable = !planResult.error
       const dailyPlan = decorateDailyPlan(planAvailable ? planResult.value : null)
       const queue = this.data.activeKnowledgeSetId || this.data.showAllDue || !planAvailable
@@ -173,30 +194,72 @@ Page({
         ? previousIndex
         : Math.min(this.data.activeIndex, Math.max(0, queue.length - 1))
       const activeCard = queue[activeIndex] || null
+      // A silent refresh may finish after the user has continued typing.
+      this.saveCardState()
       this.stopEvaluationPolling()
       this.setData({
         queue,
         allQueue,
         activeIndex,
         activeCard,
-        answer: '',
-        answerResult: null,
-        hintsVisible: false,
+        ...this.restoreCardState(activeCard),
         loading: false,
+        syncing: false,
         busy: false,
         overview: { ...overview, next_due_label: nextDueLabel(overview.next_due_at) },
         history: historyFor(history),
         dailyPlan,
         planAvailable,
-        evaluationWaitingLong: false,
-        ratings: ratingsFor(activeCard),
       })
-      if (previousCardId !== (activeCard && activeCard.id)) this.resetAttemptKeys()
+      this.resumeEvaluation()
       this.updateTabBadge(allQueue.length)
       wx.removeStorageSync('memoryAgentReviewQueueDirty')
     } catch (error) {
-      this.setData({ loading: false, busy: false, error: error.message })
+      if (loadId === this._loadId && !this._unloaded) this.setData({ loading: false, syncing: false, busy: false, error: error.message })
+    } finally { if (loadId === this._loadId) this._loadingData = false }
+  },
+
+  saveCardState() {
+    const card = this.data.activeCard
+    if (!card) return
+    if (!this._cardStates) this._cardStates = {}
+    this._cardStates[card.id] = {
+      answer: this.data.answer, answerResult: this.data.answerResult,
+      hintsVisible: this.data.hintsVisible, evaluationExpanded: this.data.evaluationExpanded,
+      keys: [this._answerIdempotencyKey, this._answerSubmittedValue, this._ratingIdempotencyKey,
+        this._ratingValue, this._ratingAcknowledged],
     }
+  },
+
+  restoreCardState(card) {
+    const saved = card && this._cardStates && this._cardStates[card.id]
+    this.resetAttemptKeys()
+    if (saved) {
+      [this._answerIdempotencyKey, this._answerSubmittedValue, this._ratingIdempotencyKey,
+        this._ratingValue, this._ratingAcknowledged] = saved.keys
+    }
+    const answerResult = saved ? saved.answerResult : null
+    return {
+      answer: saved ? saved.answer : '', answerResult,
+      hintsVisible: saved ? saved.hintsVisible : false,
+      evaluationExpanded: saved ? saved.evaluationExpanded : false,
+      evaluationWaitingLong: false,
+      ratings: ratingsFor(card, answerResult && answerResult.evaluation && answerResult.evaluation.suggested_rating),
+    }
+  },
+
+  resumeEvaluation() {
+    const result = this.data.answerResult
+    if (!this._hidden && result && result.evaluation_status === 'pending') this.startEvaluationPolling(result)
+  },
+
+  toggleEvaluation() { this.setData({ evaluationExpanded: !this.data.evaluationExpanded }) },
+
+  viewEvidence(event) {
+    const id = event.currentTarget.dataset.id
+    const unit = id && this.data.knowledgeDetail && this.data.knowledgeDetail.units.find((item) => item.id === id)
+    if (unit) openEvidence(unit.evidence, this.data.knowledgeDetail.source.id)
+    else if (this.data.answerResult) openEvidence(this.data.answerResult.evidence)
   },
 
   updateTabBadge(count) {
@@ -205,20 +268,19 @@ Page({
   },
 
   selectCard(event) {
+    if (this.data.busy || this.data.loading || this._loadingData) return
     const activeIndex = Number(event.currentTarget.dataset.index)
     const activeCard = this.data.queue[activeIndex]
+    if (!activeCard || (this.data.activeCard && this.data.activeCard.id === activeCard.id)) return
+    this.saveCardState()
     this.stopEvaluationPolling()
     this.setData({
       activeIndex,
       activeCard,
-      answer: '',
-      answerResult: null,
-      hintsVisible: false,
+      ...this.restoreCardState(activeCard),
       error: '',
-      evaluationWaitingLong: false,
-      ratings: ratingsFor(activeCard),
     })
-    this.resetAttemptKeys()
+    this.resumeEvaluation()
   },
 
   toggleHints() {
@@ -226,6 +288,7 @@ Page({
   },
 
   onAnswerInput(event) {
+    if (this.data.busy || this.data.answerResult) return
     if (this._answerSubmittedValue && this._answerSubmittedValue !== event.detail.value) {
       this._answerIdempotencyKey = null
       this._answerSubmittedValue = null
@@ -236,7 +299,10 @@ Page({
   async submitAnswer() {
     const card = this.data.activeCard
     const answer = this.data.answer.trim()
-    if (!card || !answer || this.data.busy) return
+    if (!card || !answer || this.data.busy || this.data.answerResult || this._loadingData) return
+    const requestId = this._answerRequestId = (this._answerRequestId || 0) + 1
+    const isCurrent = () => !this._unloaded && requestId === this._answerRequestId
+      && this.data.activeCard && this.data.activeCard.id === card.id
     if (!this._answerIdempotencyKey) this._answerIdempotencyKey = idempotencyKey('mini-answer')
     this._answerSubmittedValue = answer
     this.setData({ busy: true, error: '' })
@@ -245,13 +311,15 @@ Page({
         answer,
         idempotency_key: this._answerIdempotencyKey,
       })
+      if (!isCurrent()) return
+      if (answerResult.card_id !== card.id) throw new Error('回答与当前题目不匹配，请重试')
       this.setData({ answerResult, busy: false, evaluationWaitingLong: false })
-      if (answerResult.evaluation_status === 'pending') this.startEvaluationPolling(answerResult)
+      this.resumeEvaluation()
       if (answerResult.evaluation_status === 'completed' && answerResult.evaluation) {
         this.setData({ ratings: ratingsFor(card, answerResult.evaluation.suggested_rating) })
       }
     } catch (error) {
-      this.setData({ busy: false, error: error.message })
+      if (isCurrent()) this.setData({ busy: false, error: error.message })
     }
   },
 
@@ -259,7 +327,7 @@ Page({
     const rating = Number(event.currentTarget.dataset.rating)
     const card = this.data.activeCard
     const answerResult = this.data.answerResult
-    if (!card || !answerResult || this.data.busy) return
+    if (!card || !answerResult || this.data.busy || this._loadingData || answerResult.card_id !== card.id) return
     if (this._ratingIdempotencyKey && this._ratingValue !== rating) {
       this.setData({ error: '上次评分的响应未确认，请用原评分重试。' })
       return
@@ -275,21 +343,56 @@ Page({
         rating,
         idempotency_key: this._ratingIdempotencyKey,
       })
+      if (this._unloaded || !this.data.activeCard || this.data.activeCard.id !== card.id
+        || !this.data.answerResult || this.data.answerResult.attempt_id !== answerResult.attempt_id) return
       this.stopEvaluationPolling()
       const nextSessionCount = this._ratingAcknowledged
         ? this.data.sessionCount
         : this.data.sessionCount + 1
       this._ratingAcknowledged = true
+      const queue = this.data.queue.filter((item) => item.id !== card.id)
+      const allQueue = this.data.allQueue.filter((item) => item.id !== card.id)
+      const nextCard = queue[Math.min(this.data.activeIndex, Math.max(0, queue.length - 1))] || null
+      const historyItem = {
+        id: result.id || result.event_id || `review-${result.attempt_id || Date.now()}`,
+        card_id: card.id,
+        title: card.title,
+        source_title: card.source_title,
+        rating,
+        reviewed_at: result.reviewed_at,
+        next_due_at: result.next_due_at,
+        interval_days: result.interval_days,
+        user_rating_is_final: true,
+      }
+      const dailyPlan = {
+        ...this.data.dailyPlan,
+        completed_today: Number(this.data.dailyPlan.completed_today || 0) + 1,
+        planned_count: Math.max(0, Number(this.data.dailyPlan.planned_count || 0) - 1),
+        due_now_count: Math.max(0, Number(this.data.dailyPlan.due_now_count || 0) - 1),
+      }
+      if (this._cardStates) delete this._cardStates[card.id]
+      const goal = dailyPlan.completed_today + dailyPlan.planned_count
+      dailyPlan.progress_percent = goal ? Math.round(dailyPlan.completed_today / goal * 100) : 100
       this.setData({
         sessionCount: nextSessionCount,
         lastScheduleText: `已安排到 ${nextDueLabel(result.next_due_at)}`,
         completedCard: { id: card.id, title: card.title },
         cardReminder: null,
+        queue,
+        allQueue,
+        activeIndex: Math.min(this.data.activeIndex, Math.max(0, queue.length - 1)),
+        activeCard: nextCard,
+        ...this.restoreCardState(nextCard),
+        dailyPlan,
+        overview: { ...this.data.overview, due_count: Math.max(0, Number(this.data.overview.due_count || 0) - 1) },
+        history: historyFor([historyItem, ...this.data.history]).slice(0, 10),
+        busy: false,
       })
-      await this.loadReviewData()
+      this.resumeEvaluation()
+      this.updateTabBadge(allQueue.length)
       wx.showToast({ title: '已完成一题', icon: 'success' })
     } catch (error) {
-      this.setData({ busy: false, error: error.message })
+      if (!this._unloaded && this.data.activeCard && this.data.activeCard.id === card.id) this.setData({ busy: false, error: error.message })
     }
   },
 
@@ -342,11 +445,15 @@ Page({
   },
 
   async showPractice() {
+    if (this.data.busy || this._loadingData) return
     this.setData({ section: 'practice', activeKnowledgeSetId: '', showAllDue: false })
     await this.loadReviewData()
   },
 
   async showKnowledgeSets() {
+    if (this.data.busy || this._loadingData) return
+    this.saveCardState()
+    this.stopEvaluationPolling()
     this.setData({ section: 'knowledge', activeKnowledgeSetId: '', knowledgeDetail: null, loading: true, error: '' })
     try {
       const items = await api.get('/knowledge-sets')
@@ -361,6 +468,9 @@ Page({
   },
 
   async openKnowledgeSetById(id) {
+    if (this.data.busy || this._loadingData) return
+    this.saveCardState()
+    this.stopEvaluationPolling()
     this.setData({ section: 'knowledge', loading: true, error: '' })
     try {
       const item = await api.get(`/knowledge-sets/${id}`)
@@ -451,6 +561,7 @@ Page({
   },
 
   async startKnowledgeSetReview() {
+    if (this.data.busy || this._loadingData) return
     const current = this.data.knowledgeDetail
     if (!current || !current.due_count) return
     this.setData({ section: 'practice', activeKnowledgeSetId: current.id, showAllDue: true })
@@ -463,7 +574,8 @@ Page({
   },
 
   showAllDueCards() {
-    if (this.data.showAllDue) return
+    if (this.data.showAllDue || this.data.busy || this._loadingData) return
+    this.saveCardState()
     const queue = this.data.allQueue
     const activeCard = queue[0] || null
     this.stopEvaluationPolling()
@@ -472,15 +584,14 @@ Page({
       queue,
       activeIndex: 0,
       activeCard,
-      answer: '',
-      answerResult: null,
-      hintsVisible: false,
-      ratings: ratingsFor(activeCard),
+      ...this.restoreCardState(activeCard),
     })
-    this.resetAttemptKeys()
+    this.resumeEvaluation()
   },
 
   showTodayPlan() {
+    if (this.data.busy || this._loadingData) return
+    this.saveCardState()
     if (this.data.activeKnowledgeSetId) {
       this.setData({ activeKnowledgeSetId: '', showAllDue: false })
       this.loadReviewData()
@@ -495,23 +606,24 @@ Page({
       queue,
       activeIndex: 0,
       activeCard,
-      answer: '',
-      answerResult: null,
-      hintsVisible: false,
-      ratings: ratingsFor(activeCard),
+      ...this.restoreCardState(activeCard),
     })
-    this.resetAttemptKeys()
+    this.resumeEvaluation()
   },
 
   startEvaluationPolling(answerResult) {
     this.stopEvaluationPolling()
+    const generation = this._evaluationGeneration
+    const isCurrent = () => !this._hidden && !this._unloaded && generation === this._evaluationGeneration
+      && this.data.activeCard && this.data.activeCard.id === answerResult.card_id
+      && this.data.answerResult && this.data.answerResult.attempt_id === answerResult.attempt_id
     this._evaluationPollCount = 0
     const poll = async () => {
-      if (!this.data.answerResult || this.data.answerResult.attempt_id !== answerResult.attempt_id) return
+      if (!isCurrent()) return
       this._evaluationPollCount += 1
       try {
         const result = await api.get(`/review/cards/${answerResult.card_id}/attempts/${answerResult.attempt_id}/evaluation`)
-        if (!this.data.answerResult || this.data.answerResult.attempt_id !== answerResult.attempt_id) return
+        if (!isCurrent()) return
         if (result.status === 'completed') {
           const nextAnswerResult = {
             ...this.data.answerResult,
@@ -533,8 +645,10 @@ Page({
           return
         }
       } catch (error) {
+        if (!isCurrent()) return
         if (this._evaluationPollCount >= 3) this.setData({ evaluationWaitingLong: true })
       }
+      if (!isCurrent()) return
       if (this._evaluationPollCount >= 4) this.setData({ evaluationWaitingLong: true })
       if (this._evaluationPollCount < 30) {
         this._evaluationTimer = setTimeout(poll, 1200)
@@ -544,6 +658,7 @@ Page({
   },
 
   stopEvaluationPolling() {
+    this._evaluationGeneration = (this._evaluationGeneration || 0) + 1
     if (this._evaluationTimer) clearTimeout(this._evaluationTimer)
     this._evaluationTimer = null
     this._evaluationPollCount = 0

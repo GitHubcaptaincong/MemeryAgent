@@ -5,6 +5,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from memory_agent.config import get_settings
+from memory_agent.perf import register_sql_perf_listeners
 
 
 class Base(DeclarativeBase):
@@ -34,6 +35,7 @@ def _build_engine() -> Engine:
 
 
 engine = _build_engine()
+register_sql_perf_listeners(engine)
 SessionLocal = sessionmaker(bind=engine, expire_on_commit=False, autoflush=False)
 
 

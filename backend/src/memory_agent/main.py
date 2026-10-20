@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from contextlib import asynccontextmanager
 
 import uvicorn
@@ -10,6 +11,15 @@ from memory_agent.api import internal_router, router
 from memory_agent.bootstrap import ensure_local_identity
 from memory_agent.config import get_settings
 from memory_agent.database import SessionLocal, create_schema_for_development
+from memory_agent.perf import PerfLogMiddleware
+
+if not logging.getLogger().handlers:
+    # Container logs go to stdout; without a root handler, memory_agent.* INFO
+    # records (including perf lines) would be dropped entirely.
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    )
 
 
 @asynccontextmanager
@@ -39,6 +49,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(PerfLogMiddleware)
 app.include_router(router)
 app.include_router(internal_router)
 

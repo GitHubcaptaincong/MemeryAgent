@@ -1,0 +1,9 @@
+.process-heading, .process-stage, .history-event > view { display: flex; justify-content: space-between; gap: 20rpx; align-items: center; }
+.process-heading > text { font-size: 40rpx; font-weight: 650; }
+.process-heading button { margin: 0; font-size: 25rpx; color: #007aff; }
+.process-note, .event-detail { display: block; font-size: 26rpx; color: #636366; margin-top: 16rpx; line-height: 1.6; }
+.process-stage { padding: 20rpx 0; font-size: 28rpx; }
+.process-stage text:last-child { color: #636366; }
+.event-list { margin-top: 24rpx; }
+.history-event { padding: 24rpx 0; border-bottom: 1rpx solid #e5e5ea; font-size: 28rpx; }
+.history-event > view > text:last-child { flex: none; font-size: 24rpx; color: #636366; }

@@ -2,6 +2,8 @@
   "pages": [
     "pages/capture/capture",
     "pages/review/review",
+    "pages/evidence/evidence",
+    "pages/process/process",
     "pages/insights/insights",
     "pages/reminders/reminders"
   ],

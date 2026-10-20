@@ -1,0 +1,17 @@
+<view class="evidence-page">
+  <view class="evidence-header">
+    <text class="evidence-title">{{source ? source.title : '原文依据'}}</text>
+    <text class="evidence-note">整理时保存的原文快照 · 引文与当前答案分别展示</text>
+    <scroll-view scroll-x class="evidence-tabs">
+      <button wx:for="{{evidence}}" wx:key="index" class="{{activeIndex === index ? 'selected' : ''}}" data-index="{{index}}" bindtap="selectEvidence">依据 {{index + 1}}</button>
+    </scroll-view>
+    <text wx:if="{{selected.quote}}" class="selected-quote" selectable>“{{selected.quote}}”</text>
+    <button wx:if="{{selected.url || source.origin_url}}" class="source-link" bindtap="copyLink">复制来源链接</button>
+    <view wx:if="{{error}}" class="error-banner">{{error}}<button wx:if="{{selected.source_id}}" bindtap="retry">重新加载</button></view>
+    <text wx:elif="{{loading}}" class="evidence-note">正在读取原文…</text>
+    <text wx:elif="{{source}}" class="evidence-note">{{located ? '已高亮引用区间，可上下滚动阅读完整原文。' : '引用区间与原文不匹配，未自动高亮。请对照引文阅读。'}}</text>
+  </view>
+  <scroll-view scroll-y class="source-scroll" scroll-into-view="{{scrollTarget}}">
+    <view wx:if="{{source}}" class="source-content"><text selectable>{{before}}</text><text wx:if="{{located}}" id="evidence-highlight" class="highlight" selectable>{{quote}}</text><text selectable>{{after}}</text></view>
+  </scroll-view>
+</view>

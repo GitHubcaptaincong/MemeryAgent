@@ -89,7 +89,7 @@
           <view wx:else class="user-message">{{item.user_content}}</view>
         </view>
 
-        <view wx:if="{{item.assistant_summary || item.draft}}" class="assistant-message-row">
+        <view wx:if="{{item.assistant_summary || item.draft || item.run_id}}" class="assistant-message-row">
           <view class="assistant-mark">M</view>
           <view class="assistant-content">
             <text class="intent-badge">知识整理</text>
@@ -98,7 +98,11 @@
             <view wx:if="{{item.draft}}" class="memory-result-card">
               <view class="result-heading">
                 <view class="result-icon">🧠</view>
-                <view><text>已整理 {{item.draft.units.length}} 条记忆</text><text>{{item.draft.units.length}} 个知识点 · {{item.draft.units.length}} 个复习问题</text></view>
+                <view><text>生成 {{item.draft.units.length}} 个知识点</text><text>{{item.draft.status === 'confirmed' ? '✓ 已加入复习' : '待确认 · 可逐条展开审阅'}}</text></view>
+              </view>
+              <view class="result-actions">
+                <button wx:if="{{item.draft.status !== 'confirmed'}}" class="confirm-result" disabled="{{busy || confirmingDraftId}}" data-id="{{item.draft.id}}" bindtap="confirmDraft">{{confirmingDraftId === item.draft.id ? '正在确认…' : '确认并加入复习'}}</button>
+                <view wx:else class="confirmed-result"><button data-id="{{item.draft.id}}" bindtap="startReview">立即复习 ›</button><button data-id="{{item.draft.id}}" bindtap="viewKnowledgeSet">查看知识集 ›</button></view>
               </view>
               <view class="result-preview-list">
                 <text wx:for="{{item.draft.previewUnits}}" wx:key="id" wx:for-item="unit">{{unit.title}}</text>
@@ -109,20 +113,17 @@
 
               <view wx:if="{{expandedResultId === item.draft.id}}" class="result-details">
                 <view wx:for="{{item.draft.units}}" wx:key="id" wx:for-item="unit" class="result-unit">
-                  <text class="result-unit-title">{{unit.position}}. {{unit.title}}</text>
+                  <view class="unit-toggle" data-id="{{unit.id}}" bindtap="toggleUnit"><text class="result-unit-title">{{unit.position}}. {{unit.title}}</text><text>{{expandedUnitIds[unit.id] ? '收起' : '展开'}}</text></view>
+                  <block wx:if="{{expandedUnitIds[unit.id]}}">
                   <text class="result-unit-explanation">{{unit.explanation}}</text>
                   <view class="result-question"><text>复习问题</text><text>{{unit.question}}</text></view>
                   <text wx:if="{{unit.evidence.length}}" class="result-evidence">“{{unit.evidence[0].quote}}”</text>
+                  <button wx:if="{{unit.evidence.length}}" class="evidence-link" data-draft-id="{{item.draft.id}}" data-unit-id="{{unit.id}}" bindtap="viewEvidence">查看依据（{{unit.evidence.length}}） ›</button>
+                  </block>
                 </view>
-                <button
-                  wx:if="{{draft && item.draft.id === draft.id && item.draft.status !== 'confirmed'}}"
-                  class="confirm-result"
-                  disabled="{{busy}}"
-                  bindtap="confirmDraft"
-                >确认并加入复习</button>
-                <view wx:elif="{{item.draft.status === 'confirmed'}}" class="confirmed-result"><text>✓ 已加入知识库 · {{item.draft.units.length}} 个知识点</text><button data-id="{{item.draft.id}}" bindtap="viewKnowledgeSet">查看知识集 ›</button></view>
               </view>
             </view>
+            <button wx:if="{{item.run_id}}" class="process-link" data-id="{{item.run_id}}" bindtap="viewProcess">整理过程 ›</button>
           </view>
         </view>
       </block>
@@ -176,7 +177,7 @@
         <button class="toolbar-icon-button" aria-label="添加内容" bindtap="openAttachmentMenu">＋</button>
         <view class="composer-spacer"></view>
         <text wx:if="{{showCharCount}}" class="near-limit-count">{{charCount}} / 50000</text>
-        <button class="send-button" aria-label="发送" disabled="{{busy || !content}}" bindtap="submitContent">↑</button>
+        <button class="send-button" aria-label="发送" disabled="{{busy || confirmingDraftId || !content}}" bindtap="submitContent">↑</button>
       </view>
     </view>
   </view>

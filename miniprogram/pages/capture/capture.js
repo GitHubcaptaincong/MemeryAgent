@@ -1,6 +1,7 @@
 const api = require('../../utils/api')
 const { idempotencyKey } = require('../../utils/ids')
 const { stateLabel, eventLabel, formatClock } = require('../../utils/format')
+const { openEvidence } = require('../../utils/evidence')
 
 const finishedStates = ['awaiting_user', 'completed', 'failed', 'cancelled', 'budget_exhausted']
 const terminalStates = finishedStates.concat('retry_wait')
@@ -135,6 +136,8 @@ Page({
     tasksExpanded: true,
     draft: null,
     expandedUnitId: '',
+    expandedUnitIds: {},
+    confirmingDraftId: '',
     memoryCandidates: [],
     error: '',
   },
@@ -280,6 +283,18 @@ Page({
     this.setData({ expandedResultId: this.data.expandedResultId === id ? '' : id })
   },
 
+  viewProcess(event) {
+    const id = event.currentTarget.dataset.id
+    if (id) wx.navigateTo({ url: `/pages/process/process?runId=${encodeURIComponent(id)}` })
+  },
+
+  viewEvidence(event) {
+    const { draftId, unitId } = event.currentTarget.dataset
+    const turn = this.data.conversationTurns.find((item) => item.draft && item.draft.id === draftId)
+    const unit = turn && turn.draft.units.find((item) => item.id === unitId)
+    if (unit) openEvidence(unit.evidence, turn.draft.source_id)
+  },
+
   dismissError() {
     this.setData({ error: '' })
   },
@@ -345,7 +360,7 @@ Page({
   },
 
   async selectConversation(event) {
-    if (this.data.busy) return
+    if (this.data.busy || this.data.confirmingDraftId) return
     const id = event.currentTarget.dataset.id
     await this.loadConversation(id, true)
   },
@@ -397,6 +412,7 @@ Page({
       conversationTurns: [],
       expandedTurnIds: {},
       expandedResultId: '',
+      expandedUnitIds: {},
       content: '',
       charCount: 0,
       sourceSaved: null,
@@ -430,7 +446,7 @@ Page({
   },
 
   async newConversation() {
-    if (this.data.canceling) return
+    if (this.data.canceling || this.data.confirmingDraftId) return
     if (this.data.busy) {
       if (!await this.confirmStopForNewConversation()) return
       if (!await this.stopActiveRun({ notify: false })) return
@@ -496,7 +512,7 @@ Page({
   },
 
   async submitContent() {
-    if (this.data.busy || this.submitting) return
+    if (this.data.busy || this.submitting || this.data.confirmingDraftId) return
     const content = this.data.content.trim()
     if (!content) {
       this.setData({ error: '先写下你想记住或理解的内容。' })
@@ -685,27 +701,41 @@ Page({
 
   toggleUnit(event) {
     const id = event.currentTarget.dataset.id
-    this.setData({ expandedUnitId: this.data.expandedUnitId === id ? '' : id })
+    this.setData({ expandedUnitIds: { ...this.data.expandedUnitIds, [id]: !this.data.expandedUnitIds[id] } })
   },
 
   toggleTaskList() {
     this.setData({ tasksExpanded: !this.data.tasksExpanded })
   },
 
-  async confirmDraft() {
-    if (!this.data.draft || this.data.busy) return
-    this.setData({ busy: true, error: '' })
+  async confirmDraft(event) {
+    const id = event.currentTarget.dataset.id
+    const turn = this.data.conversationTurns.find((item) => item.draft && item.draft.id === id)
+    if (!turn || turn.draft.status === 'confirmed' || this.data.busy || this.data.confirmingDraftId) return
+    this.setData({ confirmingDraftId: id, error: '' })
     try {
-      const draft = await api.post(`/drafts/${this.data.draft.id}/confirm`, {})
+      const draft = await api.post(`/drafts/${id}/confirm`, {})
       wx.setStorageSync('memoryAgentReviewQueueDirty', true)
-      this.setData({ draft })
-      await this.pollRun()
+      this.setData({
+        conversationTurns: this.data.conversationTurns.map((item) => (
+          item.draft && item.draft.id === id ? decorateTurn({ ...item, draft }, this.data.expandedTurnIds) : item
+        )),
+        ...(this.data.draft && this.data.draft.id === id ? { draft } : {}),
+      })
+      if (this.data.run && this.data.run.id === draft.run_id) await this.pollRun()
       await this.refreshActiveConversation()
       await this.loadMemoryCandidates()
       wx.showToast({ title: '已加入知识库', icon: 'success' })
     } catch (error) {
-      this.setData({ busy: false, error: friendlyError(error) })
-    }
+      this.setData({ error: friendlyError(error) })
+    } finally { this.setData({ confirmingDraftId: '' }) }
+  },
+
+  startReview(event) {
+    const id = event.currentTarget.dataset.id
+    if (!id) return
+    wx.setStorageSync('memoryAgentPracticeSetId', id)
+    wx.switchTab({ url: '/pages/review/review' })
   },
 
   viewKnowledgeSet(event) {

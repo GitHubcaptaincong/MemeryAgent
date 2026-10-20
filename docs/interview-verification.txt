@@ -1,0 +1,27 @@
+验证日期：2026-10-12；依据当前非干净工作区。
+
+1. npm --prefix frontend run build
+退出码 0；Vite 生产构建成功。不是浏览器交互、部署或小程序验收。
+
+2. .venv/Scripts/python.exe -m pytest backend/tests -q
+输出前 10 个通过标记后未完成，主动中止；没有全量通过结果。
+
+3. 诊断运行：模型适配器、任务恢复、调度、抓取四个测试文件，开启 faulthandler_timeout=20。
+API 用例在 Starlette TestClient 初始化时停滞。线程堆栈停在 Windows asyncio ProactorEventLoop 创建 self-pipe 的 socketpair fallback / socket.accept。
+这定位了当前阻塞位置，尚未证明根因；不能归为业务逻辑失败，也不能声称已消除环境问题。该次运行主动中止。
+
+4. .venv/Scripts/python.exe -m pytest backend/tests/test_cli_proxy_adapter.py backend/tests/test_scheduler.py backend/tests/test_source_ingestion.py -q -k 'not long_text_and_public_url_sources_keep_origin_evidence'
+退出码 0，15 个用例通过。
+覆盖：适配器受控调用、草稿哈希、证据匹配与歧义、短文本路径、FSRS 状态与迁移、URL 识别、静态 HTML 提取、私网与重定向检查。
+排除了依赖 TestClient 的长文本/URL API 闭环用例。
+PytestCacheWarning：backend/.pytest_cache 写入权限拒绝；不影响本次退出码，但应记录环境限制。
+
+5. .venv/Scripts/python.exe -m pytest backend/tests/test_job_recovery.py -q --tb=short
+退出码 1，2 个用例失败，均报 sqlite3.OperationalError: no such table: users。
+测试独立运行未建表；conftest 负责删除数据库，但没有统一 create_all，相关用例依赖其他 API 用例生命周期初始化。
+这说明测试隔离/初始化存在缺口；本次没有修改测试夹具，也没有验证任务恢复业务断言通过。
+
+6. interview-evidence.json
+20 条记录的 source_id、零基半开字符范围、行号与短引文均在生成时与当前 UTF-8 源码逐条核对。
+
+未执行：真实模型、PostgreSQL 多 Worker 并发、数据库迁移验收、微信真实发送、真机、云端部署、浏览器交互、性能基准、用户学习收益评测。

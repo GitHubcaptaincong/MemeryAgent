@@ -1,3 +1,21 @@
+.review-page { padding-bottom: calc(156rpx + env(safe-area-inset-bottom)); }
+.review-page--rating { padding-bottom: calc(450rpx + env(safe-area-inset-bottom)); }
+.review-steps { display: flex; justify-content: space-between; padding: 24rpx 8rpx; color: #636366; font-size: 28rpx; }
+.review-steps .step-active { color: #007aff; font-weight: 650; }
+.request-note { display: block; padding-bottom: 20rpx; color: #636366; font-size: 24rpx; }
+.queue-chip--locked { opacity: .55; }
+.rating-dock { position: fixed; z-index: 990; left: 0; right: 0; bottom: calc(104rpx + env(safe-area-inset-bottom)); padding: 20rpx 24rpx; border-top: 1rpx solid #d1d1d6; background: #f2f2f7; box-shadow: 0 -6rpx 24rpx rgba(0,0,0,.06); }
+.rating-dock .rating-intro { margin: 0 0 16rpx; }
+.rating-dock .rating-intro text:first-child { font-size: 28rpx; }
+.rating-dock .rating-intro text:last-child { font-size: 24rpx; color: #48484a; }
+.rating-dock .rating-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10rpx; }
+.rating-dock .rating-button { width: 100%; margin: 0; min-height: 132rpx; padding: 12rpx 10rpx; border-radius: 16rpx; line-height: 1.4; }
+.rating-dock .rating-button > text:nth-child(2) { font-size: 26rpx; }
+.rating-dock .rating-button > text:last-child { font-size: 23rpx; color: #48484a; }
+.rating-dock .rating-button__top { min-height: 30rpx; }
+.evaluation-toggle, .evidence-link { padding: 12rpx 0; margin: 12rpx 0 0; font-size: 27rpx; color: #007aff; background: transparent; text-align: left; line-height: 1.5; }
+.review-page .evidence-card text:last-of-type, .review-page .knowledge-evidence { font-size: 29rpx; color: #48484a; line-height: 1.7; }
+
 .review-title {
   display: flex;
   align-items: flex-end;

@@ -4,6 +4,7 @@ import secrets
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 
 from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy import select
@@ -14,6 +15,12 @@ from memory_agent.bootstrap import ensure_default_profile, ensure_local_identity
 from memory_agent.config import Settings, get_settings
 from memory_agent.database import get_session
 from memory_agent.models import AgentProfile, User, WechatIdentity, utc_now
+from memory_agent.perf import track_auth
+
+# Identity resolution runs on every API request; write last_seen_at at most
+# once per interval so the hot path stays read-only. Concurrent requests past
+# the interval both write ~now and last-writer-wins, which is harmless.
+LAST_SEEN_UPDATE_INTERVAL = timedelta(hours=1)
 
 
 @dataclass(frozen=True)
@@ -75,6 +82,14 @@ def _new_wechat_user(session: Session) -> User:
     return user
 
 
+def _should_refresh_last_seen(last_seen_at: datetime | None, now: datetime) -> bool:
+    if last_seen_at is None:
+        return True
+    if last_seen_at.tzinfo is None:
+        last_seen_at = last_seen_at.replace(tzinfo=UTC)
+    return (now - last_seen_at) > LAST_SEEN_UPDATE_INTERVAL
+
+
 def resolve_identity(
     session: Session,
     settings: Settings,
@@ -103,10 +118,13 @@ def resolve_identity(
         user = identity.user
         if user.status != "active":
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="user is inactive")
-        identity.unionid = unionid or identity.unionid
-        identity.last_seen_at = utc_now()
+        if unionid is not None and identity.unionid != unionid:
+            identity.unionid = unionid
+        if _should_refresh_last_seen(identity.last_seen_at, utc_now()):
+            identity.last_seen_at = utc_now()
         profile = ensure_default_profile(session, user)
-        session.commit()
+        if session.new or session.dirty:
+            session.commit()
         return IdentityContext(user=user, profile=profile, settings=settings)
 
     try:
@@ -161,4 +179,5 @@ def get_current_identity(
     session: Session = Depends(get_session),
     settings: Settings = Depends(get_settings),
 ) -> IdentityContext:
-    return resolve_identity(session, settings, request.headers)
+    with track_auth():
+        return resolve_identity(session, settings, request.headers)

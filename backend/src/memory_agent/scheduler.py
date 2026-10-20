@@ -60,6 +60,21 @@ class FsrsReviewScheduler:
         fsrs_card = Card(card_id=_card_id_as_int(card_id), due=_as_utc(due_at))
         return self._state_payload(fsrs_card)
 
+    @staticmethod
+    def has_current_state(card: ReviewCard) -> bool:
+        """True when ``schedule`` would take the stored-state fast path.
+
+        Callers use this to skip loading review history that the scheduler
+        would ignore anyway; the condition mirrors ``_load_or_replay``.
+        """
+        state = card.scheduler_state or {}
+        return (
+            state.get("algorithm") == "fsrs-6"
+            and state.get("config_version") == FSRS_CONFIG_VERSION
+            and state.get("library_version") == FSRS_LIBRARY_VERSION
+            and isinstance(state.get("card"), dict)
+        )
+
     def schedule(
         self,
         card: ReviewCard,

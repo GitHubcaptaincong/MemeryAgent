@@ -1,4 +1,4 @@
-<view class="page-shell review-page">
+<view class="page-shell review-page {{section === 'practice' && answerResult ? 'review-page--rating' : ''}}">
   <view class="section-tabs"><view class="{{section === 'practice' ? 'active' : ''}}" bindtap="showPractice">复习</view><view class="{{section === 'knowledge' ? 'active' : ''}}" bindtap="showKnowledgeSets">知识集</view></view>
   <block wx:if="{{section === 'practice'}}">
   <view class="large-title review-title">
@@ -64,13 +64,16 @@
   <block wx:else>
     <scroll-view class="queue-strip" scroll-x="{{true}}" enhanced="{{true}}" show-scrollbar="{{false}}">
       <view class="queue-strip__inner">
-        <view wx:for="{{queue}}" wx:key="id" class="queue-chip {{activeIndex === index ? 'queue-chip--active' : ''}}" data-index="{{index}}" bindtap="selectCard">
+        <view wx:for="{{queue}}" wx:key="id" class="queue-chip {{activeIndex === index ? 'queue-chip--active' : ''}} {{busy || syncing ? 'queue-chip--locked' : ''}}" aria-disabled="{{busy || syncing}}" data-index="{{index}}" bindtap="selectCard">
           <text>{{index + 1}}</text>
           <view><text>{{item.title}}</text><text>第 {{item.review_count + 1}} 次</text></view>
         </view>
       </view>
     </scroll-view>
 
+    <view class="review-steps"><text class="{{!answerResult ? 'step-active' : ''}}">1 作答</text><text>→</text><text class="{{answerResult ? 'step-active' : ''}}">2 对照</text><text>→</text><text>3 自评</text></view>
+    <text wx:if="{{busy}}" class="request-note">正在保存当前题，请稍候再切题。</text>
+    <text wx:elif="{{syncing}}" class="request-note">正在同步队列，你可以继续编辑回答。</text>
     <view wx:if="{{activeCard}}" class="ios-card question-card card-padding">
       <view class="question-meta"><text>OPEN QUESTION</text><text>{{activeCard.source_title}}</text></view>
       <text class="question-title">{{activeCard.question}}</text>
@@ -82,15 +85,15 @@
           <view wx:for="{{activeCard.hints}}" wx:key="*this"><text>{{index + 1}}</text><text>{{item}}</text></view>
         </view>
         <view class="answer-editor">
-          <textarea value="{{answer}}" maxlength="3000" auto-height="{{false}}" placeholder="把你记得的机制、原因或步骤讲出来……" bindinput="onAnswerInput"></textarea>
+          <textarea value="{{answer}}" disabled="{{busy}}" maxlength="3000" auto-height="{{false}}" placeholder="把你记得的机制、原因或步骤讲出来……" bindinput="onAnswerInput"></textarea>
           <text>{{answer.length}} 字</text>
         </view>
-        <button class="ios-button" disabled="{{busy || !answer}}" bindtap="submitAnswer">{{busy ? '正在保存…' : '提交回答'}}</button>
+        <button class="ios-button" disabled="{{busy || syncing || !answer}}" bindtap="submitAnswer">{{busy ? '正在保存…' : '提交回答'}}</button>
       </view>
     </view>
 
     <block wx:if="{{answerResult}}">
-      <text class="section-label">对照答案</text>
+      <text class="section-label">2 · 对照答案</text>
       <view class="ios-card compare-card">
         <view class="compare-section">
           <text class="compare-label">你的回答</text>
@@ -101,7 +104,7 @@
           <text class="compare-label blue">答案要点</text>
           <view wx:for="{{answerResult.answer_key}}" wx:key="*this" class="answer-point"><text>✓</text><text>{{item}}</text></view>
         </view>
-        <view wx:if="{{answerResult.evidence.length}}" class="evidence-card"><text>原文证据</text><text>“{{answerResult.evidence[0].quote}}”</text></view>
+        <view wx:if="{{answerResult.evidence.length}}" class="evidence-card"><text>原文证据</text><text>“{{answerResult.evidence[0].quote}}”</text><button class="evidence-link" bindtap="viewEvidence">查看依据（{{answerResult.evidence.length}}） ›</button></view>
       </view>
 
       <text class="section-label">AI 回答评估</text>
@@ -120,19 +123,21 @@
           <text>仅供参考</text>
         </view>
         <text class="evaluation-summary">{{answerResult.evaluation.summary}}</text>
-        <view wx:if="{{answerResult.evaluation.missing_points.length}}" class="evaluation-points">
+        <button class="evaluation-toggle" bindtap="toggleEvaluation">{{evaluationExpanded ? '收起 AI 详细建议' : '展开 AI 详细建议'}}</button>
+        <view wx:if="{{evaluationExpanded && answerResult.evaluation.missing_points.length}}" class="evaluation-points">
           <text>建议补充</text>
           <view wx:for="{{answerResult.evaluation.missing_points}}" wx:key="point_index"><text>{{index + 1}}</text><view><text>{{item.point}}</text><text>{{item.suggestion}}</text></view></view>
         </view>
-        <view wx:else class="evaluation-complete">✓ 答案要点已全部覆盖</view>
+        <view wx:elif="{{evaluationExpanded}}" class="evaluation-complete">✓ 答案要点已全部覆盖</view>
       </view>
 
-      <text class="section-label">你的最终判断</text>
-      <view class="rating-intro"><text>掌握得怎么样？</text><text>当前由你最终评分，AI 不会覆盖这个选择。</text></view>
+      <view class="rating-dock">
+      <view class="rating-intro"><text>3 · 自评</text><text>对照后选择，AI 不会覆盖你的评分。</text></view>
       <view class="rating-grid">
-        <button wx:for="{{ratings}}" wx:key="value" class="rating-button rating-button--{{item.tone}} {{item.recommendedClass}}" disabled="{{busy}}" data-rating="{{item.value}}" bindtap="rateAnswer">
+        <button wx:for="{{ratings}}" wx:key="value" class="rating-button rating-button--{{item.tone}} {{item.recommendedClass}}" disabled="{{busy || syncing}}" data-rating="{{item.value}}" bindtap="rateAnswer">
           <view class="rating-button__top"><text>{{item.value}}</text><text wx:if="{{item.recommended}}">AI 建议</text></view><text>{{item.label}}</text><text>{{item.hint}}</text>
         </button>
+      </view>
       </view>
     </block>
 
@@ -165,7 +170,7 @@
       <view class="knowledge-units">
         <view wx:for="{{knowledgeDetail.units}}" wx:key="id" class="ios-card knowledge-unit">
           <view class="knowledge-unit__top" data-id="{{item.id}}" bindtap="toggleKnowledgeUnit"><text>{{index + 1}}</text><view><text>{{item.question}}</text><text>累计复习 {{item.review_count}} 次</text></view><text>{{expandedUnitId === item.id ? '⌃' : '⌄'}}</text></view>
-          <view wx:if="{{expandedUnitId === item.id}}" class="knowledge-unit__body"><text>{{item.answer}}</text><view wx:if="{{item.evidence.length}}" class="knowledge-evidence">“{{item.evidence[0].quote}}”</view><view class="knowledge-actions"><button data-id="{{item.id}}" bindtap="editKnowledgeUnit">编辑问答</button><button data-id="{{item.id}}" bindtap="deleteKnowledgeUnit">删除知识点</button></view></view>
+          <view wx:if="{{expandedUnitId === item.id}}" class="knowledge-unit__body"><text>{{item.answer}}</text><view wx:if="{{item.evidence.length}}" class="knowledge-evidence">“{{item.evidence[0].quote}}”<button class="evidence-link" data-id="{{item.id}}" bindtap="viewEvidence">查看依据（{{item.evidence.length}}） ›</button></view><view class="knowledge-actions"><button data-id="{{item.id}}" bindtap="editKnowledgeUnit">编辑问答</button><button data-id="{{item.id}}" bindtap="deleteKnowledgeUnit">删除知识点</button></view></view>
         </view>
       </view>
       <button class="knowledge-delete" bindtap="deleteKnowledgeSet">删除整个知识集</button>

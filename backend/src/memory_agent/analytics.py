@@ -8,7 +8,7 @@ from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only
 
 from memory_agent.models import (
     DraftUnit,
@@ -214,6 +214,13 @@ def _load_active_card_bundles(session: Session, *, user_id: UUID) -> list[_CardB
         .join(DraftUnit, ReviewCard.draft_unit_id == DraftUnit.id)
         .join(KnowledgeDraft, DraftUnit.draft_id == KnowledgeDraft.id)
         .join(Source, KnowledgeDraft.source_id == Source.id)
+        # Only these columns are read by plan/insights payloads; Source text
+        # and unit explanations can be large and stay deferred.
+        .options(
+            load_only(Source.id, Source.title),
+            load_only(KnowledgeDraft.id),
+            load_only(DraftUnit.id, DraftUnit.title, DraftUnit.question, DraftUnit.tags),
+        )
         .where(
             ReviewCard.user_id == user_id,
             ReviewCard.status == "active",

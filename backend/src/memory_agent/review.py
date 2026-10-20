@@ -6,7 +6,7 @@ from typing import Any
 from uuid import UUID
 
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only
 
 from memory_agent.models import (
     DraftSourceSpan,
@@ -78,6 +78,14 @@ def list_due_review_cards(
         .join(DraftUnit, ReviewCard.draft_unit_id == DraftUnit.id)
         .join(KnowledgeDraft, DraftUnit.draft_id == KnowledgeDraft.id)
         .join(Source, KnowledgeDraft.source_id == Source.id)
+        # Source.raw_content can hold 50k chars per row; the queue payload only
+        # reads title (plus draft/unit fields below). Deferred columns would
+        # lazy-load on access, and nothing in this path accesses them.
+        .options(
+            load_only(Source.id, Source.title),
+            load_only(KnowledgeDraft.id, KnowledgeDraft.learning_goal),
+            load_only(DraftUnit.id, DraftUnit.title, DraftUnit.question, DraftUnit.hints),
+        )
         .where(
             ReviewCard.user_id == user_id,
             ReviewCard.status == "active",
@@ -91,6 +99,16 @@ def list_due_review_cards(
     if knowledge_set_id is not None:
         statement = statement.where(KnowledgeDraft.id == knowledge_set_id)
     rows = session.execute(statement).all()
+    # Cards whose stored scheduler_state is current never consume review
+    # history (the scheduler fast-path deserializes state directly), so only
+    # legacy cards need the history query — loaded in one batched statement.
+    legacy_card_ids = [
+        card.id for card, _unit, _draft, _source in rows
+        if not scheduler.has_current_state(card)
+    ]
+    history_by_card = _historical_reviews_batch(
+        session, card_ids=legacy_card_ids
+    )
     return [
         _card_payload(
             card,
@@ -101,7 +119,7 @@ def list_due_review_cards(
                 scheduler,
                 card,
                 reviewed_at=due,
-                history=_historical_reviews(session, card_id=card.id),
+                history=history_by_card.get(card.id, []),
             ),
         )
         for card, unit, draft, source in rows
@@ -500,6 +518,7 @@ def _card_bundle(
         .join(DraftUnit, ReviewCard.draft_unit_id == DraftUnit.id)
         .join(KnowledgeDraft, DraftUnit.draft_id == KnowledgeDraft.id)
         .join(Source, KnowledgeDraft.source_id == Source.id)
+        .options(load_only(Source.id, Source.title))
         .where(ReviewCard.id == card_id, ReviewCard.user_id == user_id)
     )
     if lock:
@@ -632,6 +651,40 @@ def _rating_options(
             )
         ]
     ]
+
+
+def _historical_reviews_batch(
+    session: Session, *, card_ids: list[UUID]
+) -> dict[UUID, list[HistoricalReview]]:
+    """Load review history for many cards in one query, grouped per card.
+
+    Mirrors ``_historical_reviews`` (same ordering and rating validation) so
+    the scheduler replay path behaves exactly as with per-card queries.
+    """
+    if not card_ids:
+        return {}
+    events = session.scalars(
+        select(ReviewEvent)
+        .where(
+            ReviewEvent.card_id.in_(card_ids),
+            ReviewEvent.event_type == "review_rated",
+        )
+        .order_by(ReviewEvent.created_at, ReviewEvent.id)
+    ).all()
+    grouped: dict[UUID, list[HistoricalReview]] = {}
+    for event in events:
+        payload = event.payload_json or {}
+        rating = payload.get("rating")
+        if rating is None:
+            raise ValueError("review history is missing a rating")
+        reviewed_at = payload.get("reviewed_at") or event.created_at
+        grouped.setdefault(event.card_id, []).append(
+            HistoricalReview(
+                rating=int(rating),
+                reviewed_at=_parse_datetime(reviewed_at),
+            )
+        )
+    return grouped
 
 
 def _historical_reviews(

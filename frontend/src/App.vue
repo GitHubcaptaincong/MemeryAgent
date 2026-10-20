@@ -896,7 +896,8 @@ async function rateReview(rating) {
   reviewBusy.value = true
   reviewError.value = ''
   try {
-    await api(`/api/v1/review/cards/${activeReviewCard.value.id}/ratings`, {
+    const reviewedCard = activeReviewCard.value
+    const result = await api(`/api/v1/review/cards/${reviewedCard.id}/ratings`, {
       method: 'POST',
       body: JSON.stringify({
         attempt_id: reviewAnswerResult.value.attempt_id,
@@ -906,7 +907,31 @@ async function rateReview(rating) {
     })
     if (!reviewRatingAcknowledged.value) reviewedThisSession.value += 1
     reviewRatingAcknowledged.value = true
-    await loadReviewData()
+    reviewQueue.value = reviewQueue.value.filter((item) => item.id !== reviewedCard.id)
+    reviewHistory.value = [{
+      id: result.id || result.event_id || `review-${result.attempt_id || Date.now()}`,
+      card_id: reviewedCard.id,
+      title: reviewedCard.title,
+      source_title: reviewedCard.source_title,
+      rating,
+      reviewed_at: result.reviewed_at,
+      next_due_at: result.next_due_at,
+      interval_days: result.interval_days,
+      user_rating_is_final: true,
+    }, ...reviewHistory.value].slice(0, 10)
+    if (dailyPlan.value) {
+      dailyPlan.value = {
+        ...dailyPlan.value,
+        completed_today: Number(dailyPlan.value.completed_today || 0) + 1,
+        planned_count: Math.max(0, Number(dailyPlan.value.planned_count || 0) - 1),
+        due_now_count: Math.max(0, Number(dailyPlan.value.due_now_count || 0) - 1),
+      }
+    }
+    reviewOverview.value = {
+      ...reviewOverview.value,
+      due_count: Math.max(0, Number(reviewOverview.value.due_count || 0) - 1),
+    }
+    selectReviewCard(visibleReviewQueue.value[0] || null)
   } catch (reason) {
     reviewError.value = reason.message
   } finally {

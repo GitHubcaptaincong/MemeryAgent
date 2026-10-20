@@ -465,10 +465,16 @@
   margin-top: 14rpx;
   padding-left: 16rpx;
   border-left: 4rpx solid #c7c7cc;
-  color: #8e8e93;
-  font-size: 22rpx;
-  line-height: 1.5;
+  color: #48484a;
+  font-size: 29rpx;
+  line-height: 1.7;
 }
+
+.result-actions { padding: 0 24rpx 20rpx; }
+.result-actions .confirm-result, .result-actions .confirmed-result { margin-top: 8rpx; }
+.unit-toggle { display: flex; justify-content: space-between; gap: 16rpx; align-items: center; }
+.unit-toggle > text:last-child { flex: none; color: #007aff; font-size: 24rpx; }
+.process-link, .evidence-link { margin: 16rpx 0 0; padding: 12rpx 0; background: transparent; color: #007aff; font-size: 27rpx; text-align: left; line-height: 1.5; }
 
 .confirm-result {
   min-height: 80rpx;
