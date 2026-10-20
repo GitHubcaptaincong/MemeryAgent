@@ -115,7 +115,8 @@
         <view class="evaluation-status"><view class="evaluation-fallback">!</view><view><text>AI 评估暂时不可用</text><text>这不会影响复习，请根据答案要点完成最终评分。</text></view></view>
       </view>
       <view wx:elif="{{answerResult.evaluation_status === 'disabled'}}" class="ios-card evaluation-card">
-        <view class="evaluation-status"><view class="evaluation-fallback">—</view><view><text>AI 评估已关闭</text><text>你可以在“提醒”页随时重新开启。</text></view></view>
+        <view class="evaluation-status"><view class="evaluation-fallback">—</view><view><text>AI 评估已关闭</text><text>你可以在“设置 → AI 辅助”中重新开启。</text></view></view>
+        <button class="evaluation-toggle" bindtap="goToSettings">前往设置 ›</button>
       </view>
       <view wx:elif="{{answerResult.evaluation_status === 'completed'}}" class="ios-card evaluation-card evaluation-card--done">
         <view class="evaluation-heading">

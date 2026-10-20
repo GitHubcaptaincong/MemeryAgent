@@ -49,7 +49,7 @@ function page(name, api = {}) {
     clearTimeout: (id) => timers.delete(id),
   }, { filename })
   instance.data.loading = false
-  return { instance, timers, storage, navigations }
+  return { instance, timers, storage, navigations, wx }
 }
 
 const event = (dataset) => ({ currentTarget: { dataset } })
@@ -304,4 +304,204 @@ test('immediate review opens a queue filtered to the confirmed set', async () =>
   assert.equal(context.instance.data.activeKnowledgeSetId, 'set-1')
   assert.equal(context.instance.data.section, 'practice')
   assert.equal(loads, 1)
+})
+
+test('example fills the composer without a model request; replacement can be declined', () => {
+  const { instance: p, wx } = page('capture', { post: () => assert.fail('must not submit automatically') })
+  p.useExample()
+  assert.match(p.data.content, /幂等性/)
+  assert.equal(p.data.charCount, p.data.content.length)
+  assert.match(p.data.inputNotice, /点击发送/)
+  p.onContentInput({ detail: { value: '我自己的材料' } })
+  wx.showModal = ({ success }) => success({ confirm: false })
+  p.useExample()
+  assert.equal(p.data.content, '我自己的材料')
+})
+
+test('material replacement cannot overwrite text typed while confirmation was open', () => {
+  const { instance: p, wx } = page('capture')
+  p.data.content = '旧内容'
+  let confirm
+  wx.showModal = ({ success }) => { confirm = success }
+  p.useExample()
+  p.onContentInput({ detail: { value: '较新的内容' } })
+  confirm({ confirm: true })
+  assert.equal(p.data.content, '较新的内容')
+})
+
+test('clipboard is inserted only on user action and oversized material is not silently truncated', () => {
+  const { instance: p, wx } = page('capture')
+  wx.getClipboardData = ({ success }) => success({ data: '从剪贴板读取的材料' })
+  p.pasteClipboard()
+  assert.equal(p.data.content, '从剪贴板读取的材料')
+  p.fillMaterial('字'.repeat(50001))
+  assert.equal(p.data.content, '从剪贴板读取的材料')
+  assert.match(p.data.error, /50,000/)
+})
+
+test('link entry rejects non-HTTP input and fills a valid URL without submitting', () => {
+  const { instance: p, wx } = page('capture', { post: () => assert.fail('must not submit') })
+  wx.showModal = ({ success }) => success({ confirm: true, content: 'javascript:alert(1)' })
+  p.promptForLink()
+  assert.equal(p.data.content, '')
+  assert.match(p.data.error, /https/)
+  wx.showModal = ({ success }) => success({ confirm: true, content: 'https://example.com/article' })
+  p.promptForLink()
+  assert.equal(p.data.content, 'https://example.com/article')
+  assert.equal(p.data.error, '')
+})
+
+const unit = { id: 'unit-a', title: '知识点 A', question: '原问题', answer: '原答案', evidence: [{ quote: '原文依据' }] }
+const setDetail = () => ({ id: 'set-a', units: [structuredClone(unit)], source: { id: 'source-a' } })
+async function editor(api = {}) {
+  const context = page('knowledge-edit', { get: async () => setDetail(), ...api })
+  const p = context.instance
+  p.setId = 'set-a'
+  p.unitId = 'unit-a'
+  context.savedEvents = []
+  p.getOpenerEventChannel = () => ({ emit: (name, payload) => context.savedEvents.push({ name, payload }) })
+  await p.loadUnit()
+  return context
+}
+const inputField = (field, value) => ({ ...event({ field }), detail: { value } })
+
+test('editor loads both fields and evidence, and validates before sending', async () => {
+  const { instance: p } = await editor({ patch: () => assert.fail('must validate first') })
+  assert.equal(p.data.question, unit.question)
+  assert.equal(p.data.answer, unit.answer)
+  assert.equal(p.data.unit.evidence[0].quote, '原文依据')
+  p.onFieldInput(inputField('question', '   '))
+  await p.save()
+  assert.match(p.data.error, /同时填写/)
+  p.onFieldInput(inputField('question', '问'.repeat(4001)))
+  await p.save()
+  assert.match(p.data.error, /4,000/)
+})
+
+test('editor sends both fields together, blocks duplicate saves and reports the saved detail', async () => {
+  const pending = deferred()
+  const calls = []
+  const context = await editor({ patch: (url, payload) => {
+    calls.push({ url, payload })
+    return pending.promise
+  } })
+  const p = context.instance
+  p.onFieldInput(inputField('question', ' 新问题 '))
+  p.onFieldInput(inputField('answer', ' 要点一\n要点二 '))
+  const saving = p.save()
+  p.onFieldInput(inputField('answer', '保存期间不能改写'))
+  await p.save()
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0].url, '/knowledge-units/unit-a')
+  assert.equal(calls[0].payload.question, '新问题')
+  assert.equal(calls[0].payload.answer, '要点一\n要点二')
+  const detail = setDetail()
+  Object.assign(detail.units[0], calls[0].payload)
+  pending.resolve(detail)
+  await saving
+  assert.equal(p.data.dirty, false)
+  assert.equal(p.data.saved, true)
+  assert.equal(context.savedEvents[0].payload.unitId, 'unit-a')
+  assert.equal(context.storage.get('memoryAgentReviewQueueDirty'), true)
+  assert.equal(p.data.unit.evidence[0].quote, '原文依据')
+})
+
+test('failed editing keeps both inputs for retry', async () => {
+  const { instance: p } = await editor({ patch: async () => { throw new Error('网络暂不可用') } })
+  p.onFieldInput(inputField('question', '修改后的问题'))
+  p.onFieldInput(inputField('answer', '修改后的答案'))
+  await p.save()
+  assert.equal(p.data.question, '修改后的问题')
+  assert.equal(p.data.answer, '修改后的答案')
+  assert.equal(p.data.dirty, true)
+  assert.equal(p.data.saving, false)
+  assert.match(p.data.error, /网络/)
+})
+
+test('cancel editing asks before discarding and never writes data', async () => {
+  const { instance: p, wx } = await editor({ patch: () => assert.fail('cancel must not write') })
+  let returns = 0
+  wx.navigateBack = () => { returns++ }
+  p.onFieldInput(inputField('answer', '未保存答案'))
+  wx.showModal = ({ success }) => success({ confirm: false })
+  p.cancel()
+  assert.equal(returns, 0)
+  assert.equal(p.data.answer, '未保存答案')
+  wx.showModal = ({ success }) => success({ confirm: true })
+  p.cancel()
+  assert.equal(returns, 1)
+})
+
+test('opening editor uses one full-form page and saving refreshes only the edited card state', () => {
+  const { instance: p, wx } = review()
+  p.data.knowledgeDetail = setDetail()
+  p.data.allQueue = [{ ...a, draft_unit_id: 'unit-a' }, { ...b, draft_unit_id: 'unit-b' }]
+  p.data.activeCard = p.data.allQueue[0]
+  p.data.answerResult = answered('a')
+  p._cardStates = { a: { answer: '旧回答' }, b: { answer: '保留 B 的草稿' } }
+  let options
+  wx.navigateTo = (value) => { options = value }
+  p.editKnowledgeUnit(event({ id: 'unit-a' }))
+  assert.match(options.url, /pages\/knowledge-edit\/knowledge-edit/)
+  const detail = setDetail()
+  detail.units[0].question = '更新的问题'
+  options.events.saved({ detail, unitId: 'unit-a' })
+  assert.equal(p.data.knowledgeDetail.units[0].question, '更新的问题')
+  assert.equal(p.data.answerResult, null)
+  assert.equal(p._cardStates.a, undefined)
+  assert.equal(p._cardStates.b.answer, '保留 B 的草稿')
+})
+
+async function settings(api = {}) {
+  const context = page('reminders', {
+    get: async (url) => url.endsWith('/preferences')
+      ? { enabled: false, preferred_time: '20:00', daily_limit: 10, overdue_enabled: true, ai_evaluation_enabled: false }
+      : { template_id: 'template-a', available_grants: 0 },
+    ...api,
+  })
+  await context.instance.loadPreferences()
+  return context
+}
+
+test('AI setting and study plan remain editable with reminders disabled; unsaved edits survive onShow', async () => {
+  const { instance: p } = await settings()
+  p.onAiEvaluationChange({ detail: { value: true } })
+  p.onLimitChange({ detail: { value: 20 } })
+  assert.equal(p.data.form.enabled, false)
+  assert.equal(p.data.form.ai_evaluation_enabled, true)
+  assert.equal(p.data.form.daily_limit, 20)
+  p.loadPreferences = () => assert.fail('unsaved settings must not be reloaded')
+  p.onShow()
+  assert.equal(p.data.dirty, true)
+})
+
+test('settings save blocks concurrent edits and includes AI and reminder preferences', async () => {
+  const pending = deferred()
+  let payload
+  const { instance: p } = await settings({ put: (_url, value) => { payload = value; return pending.promise } })
+  p.onAiEvaluationChange({ detail: { value: true } })
+  const saving = p.savePreferences()
+  p.onAiEvaluationChange({ detail: { value: false } })
+  assert.equal(p.data.form.ai_evaluation_enabled, true)
+  assert.equal(payload.enabled, false)
+  assert.equal(payload.ai_evaluation_enabled, true)
+  pending.resolve(payload)
+  await saving
+  assert.equal(p.data.dirty, false)
+  assert.equal(p.data.saved, true)
+})
+
+test('settings failure preserves edits and failed initial load cannot save defaults', async () => {
+  const { instance: p } = await settings({ put: async () => { throw new Error('保存失败') } })
+  p.onTimeChange({ detail: { value: '21:30' } })
+  await p.savePreferences()
+  assert.equal(p.data.form.preferred_time, '21:30')
+  assert.equal(p.data.dirty, true)
+  assert.equal(p.data.saved, false)
+  const broken = await settings({
+    get: async () => { throw new Error('读取失败') },
+    put: () => assert.fail('must not save defaults after failed load'),
+  })
+  await broken.instance.savePreferences()
+  assert.equal(broken.instance.data.preferencesAvailable, false)
 })

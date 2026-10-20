@@ -1,0 +1,12 @@
+.edit-page { padding-bottom: calc(180rpx + env(safe-area-inset-bottom)); }
+.edit-title { display: block; font-size: 38rpx; font-weight: 650; line-height: 1.5; }
+.edit-note { display: block; margin: 12rpx 0 24rpx; font-size: 25rpx; color: #636366; line-height: 1.6; }
+.field-heading { display: flex; justify-content: space-between; align-items: center; gap: 16rpx; margin-bottom: 20rpx; }
+.field-heading text:first-child, .field-label { font-size: 30rpx; font-weight: 650; }
+.field-heading text:last-child { color: #636366; font-size: 23rpx; }
+.question-input, .answer-input { width: 100%; font-size: 30rpx; line-height: 1.7; min-height: 150rpx; }
+.answer-input { min-height: 280rpx; }
+.evidence-quote { display: block; margin-top: 20rpx; padding-left: 18rpx; border-left: 4rpx solid #b8d7fb; font-size: 29rpx; line-height: 1.7; white-space: pre-wrap; }
+.evidence-link { margin: 20rpx 0 0; padding: 10rpx 0; background: transparent; color: #007aff; text-align: left; font-size: 26rpx; line-height: 1.6; }
+.edit-actions { position: fixed; bottom: 0; right: 0; left: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 20rpx; padding: 20rpx 28rpx calc(24rpx + env(safe-area-inset-bottom)); background: #f2f2f7; border-top: 1rpx solid #d1d1d6; }
+.edit-actions button { width: 100%; margin: 0; font-size: 28rpx; }

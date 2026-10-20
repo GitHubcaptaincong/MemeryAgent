@@ -513,18 +513,41 @@ Page({
     } catch (error) { this.setData({ error: error.message }) }
   },
 
-  async editKnowledgeUnit(event) {
+  editKnowledgeUnit(event) {
+    if (this.data.busy || !this.data.knowledgeDetail) return
     const id = event.currentTarget.dataset.id
     const unit = this.data.knowledgeDetail.units.find((item) => item.id === id)
     if (!unit) return
-    const question = await this.promptValue('编辑复习问题', unit.question)
-    if (!question || !question.trim()) return
-    const answer = await this.promptValue('编辑答案要点', unit.answer)
-    if (!answer || !answer.trim()) return
-    try {
-      await api.patch(`/knowledge-units/${id}`, { question: question.trim(), answer: answer.trim() })
-      await this.openKnowledgeSetById(this.data.knowledgeDetail.id)
-    } catch (error) { this.setData({ error: error.message }) }
+    wx.navigateTo({
+      url: `/pages/knowledge-edit/knowledge-edit?setId=${encodeURIComponent(this.data.knowledgeDetail.id)}&unitId=${encodeURIComponent(id)}`,
+      events: { saved: ({ detail, unitId }) => this.onKnowledgeEdited(detail, unitId) },
+      fail: () => this.setData({ error: '编辑页打开失败，请重试。' }),
+    })
+  },
+
+  onKnowledgeEdited(detail, unitId) {
+    if (this._unloaded) return
+    const affected = this.data.allQueue.filter((card) => card.draft_unit_id === unitId)
+    affected.forEach((card) => { if (this._cardStates) delete this._cardStates[card.id] })
+    if (this.data.activeCard && this.data.activeCard.draft_unit_id === unitId) {
+      this.stopEvaluationPolling()
+      this.resetAttemptKeys()
+      this.setData({ answer: '', answerResult: null, hintsVisible: false, evaluationExpanded: false })
+    }
+    if (this.data.knowledgeDetail && this.data.knowledgeDetail.id === detail.id) {
+      this.setData({
+        knowledgeDetail: {
+          ...decorateKnowledgeSet(detail),
+          units: detail.units.map((unit) => ({ ...unit, last_reviewed_label: unit.last_reviewed_at ? dateLabel(unit.last_reviewed_at) : '尚未复习' })),
+        },
+        expandedUnitId: unitId,
+        error: '',
+      })
+    }
+  },
+
+  goToSettings() {
+    wx.switchTab({ url: '/pages/reminders/reminders' })
   },
 
   deleteKnowledgeUnit(event) {

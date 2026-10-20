@@ -1,34 +1,44 @@
 <view class="page-shell reminders-page">
   <view class="large-title">
-    <text class="large-title__eyebrow">REVIEW RHYTHM</text>
-    <text class="large-title__heading">按你的节奏来。</text>
-    <text class="large-title__copy">先控制每天什么时候复习、一次出现多少内容，避免提醒变成负担。</text>
+    <text class="large-title__eyebrow">PREFERENCES</text>
+    <text class="large-title__heading">设置</text>
+    <text class="large-title__copy">安排复习节奏，选择提醒方式与 AI 辅助。</text>
   </view>
 
   <view wx:if="{{error}}" class="error-banner">{{error}}</view>
-  <view wx:if="{{saved}}" class="success-banner">✓ 提醒偏好已经保存</view>
+  <view wx:if="{{saved}}" class="success-banner">✓ 复习与 AI 辅助设置已保存</view>
+  <view wx:elif="{{dirty}}" class="settings-unsaved">有未保存的修改，请点击“保存设置”生效。</view>
 
   <view wx:if="{{loading}}" class="ios-card loading-settings">正在读取设置…</view>
 
   <block wx:else>
-    <text class="section-label">每日提醒</text>
+    <button wx:if="{{!preferencesAvailable}}" class="ios-button ios-button--plain" bindtap="loadPreferences">重新读取设置</button>
+    <text class="section-label">复习提醒</text>
     <view class="ios-card settings-group">
       <view class="setting-row">
-        <view class="setting-copy"><text>启用复习提醒</text><text>保留提醒时间与队列设置</text></view>
-        <switch checked="{{form.enabled}}" color="#34C759" bindchange="onEnabledChange" />
+        <view class="setting-copy"><text>启用复习提醒</text><text>关闭提醒后，仍可手动复习和使用 AI 建议</text></view>
+        <switch checked="{{form.enabled}}" disabled="{{saving || !preferencesAvailable}}" color="#34C759" bindchange="onEnabledChange" />
       </view>
       <view class="hairline"></view>
-      <picker mode="time" value="{{form.preferred_time}}" disabled="{{!form.enabled}}" bindchange="onTimeChange">
+      <picker mode="time" value="{{form.preferred_time}}" disabled="{{!form.enabled || saving || !preferencesAvailable}}" bindchange="onTimeChange">
         <view class="setting-row {{!form.enabled ? 'setting-row--disabled' : ''}}">
           <view class="setting-copy"><text>提醒时间</text><text>每天优先开始复习的时间</text></view>
           <view class="setting-value"><text>{{form.preferred_time}}</text><text>›</text></view>
         </view>
       </picker>
       <view class="hairline"></view>
-      <view class="limit-setting {{!form.enabled ? 'setting-row--disabled' : ''}}">
+      <view class="setting-row {{!form.enabled ? 'setting-row--disabled' : ''}}">
+        <view class="setting-copy"><text>提醒中包含逾期</text><text>关闭后逾期卡仍保留在“全部到期”中</text></view>
+        <switch checked="{{form.overdue_enabled}}" disabled="{{!form.enabled || saving || !preferencesAvailable}}" color="#34C759" bindchange="onOverdueChange" />
+      </view>
+    </view>
+
+    <text class="section-label">复习计划</text>
+    <view class="ios-card settings-group">
+      <view class="limit-setting">
         <view class="limit-heading">
-          <view class="setting-copy"><text>每日建议上限</text><text>只平衡展示负载，不改 FSRS 到期时间</text></view>
-          <text class="limit-value">{{form.daily_limit}} 条</text>
+          <view class="setting-copy"><text>每日建议上限</text><text>控制今日建议题量，不改变每题的下次复习时间</text></view>
+          <text class="limit-value">{{form.daily_limit}} 题</text>
         </view>
         <view class="limit-slider-row">
           <text>1</text>
@@ -38,7 +48,7 @@
             max="100"
             step="1"
             value="{{form.daily_limit}}"
-            disabled="{{!form.enabled}}"
+            disabled="{{saving || !preferencesAvailable}}"
             activeColor="#007AFF"
             backgroundColor="#D1D1D6"
             block-color="#FFFFFF"
@@ -49,18 +59,13 @@
           <text>100</text>
         </view>
       </view>
-      <view class="hairline"></view>
-      <view class="setting-row {{!form.enabled ? 'setting-row--disabled' : ''}}">
-        <view class="setting-copy"><text>提醒中包含逾期</text><text>关闭后逾期卡仍保留在“全部到期”中</text></view>
-        <switch checked="{{form.overdue_enabled}}" disabled="{{!form.enabled}}" color="#34C759" bindchange="onOverdueChange" />
-      </view>
     </view>
 
     <text class="section-label">AI 辅助</text>
     <view class="ios-card settings-group">
       <view class="setting-row">
-        <view class="setting-copy"><text>回答后给出 AI 建议</text><text>分析缺失点并建议 1–4 级，你始终拥有最终决定权</text></view>
-        <switch checked="{{form.ai_evaluation_enabled}}" color="#34C759" bindchange="onAiEvaluationChange" />
+        <view class="setting-copy"><text>回答后给出 AI 建议</text><text>分析遗漏要点并建议评分；是否开启都由你最终自评</text></view>
+        <switch checked="{{form.ai_evaluation_enabled}}" disabled="{{saving || !preferencesAvailable}}" color="#34C759" bindchange="onAiEvaluationChange" />
       </view>
     </view>
 
@@ -72,7 +77,7 @@
       </view>
     </view>
 
-    <button class="ios-button save-button" disabled="{{saving}}" bindtap="savePreferences">{{saving ? '正在保存…' : '保存设置'}}</button>
+    <button class="ios-button save-button" disabled="{{saving || !preferencesAvailable}}" bindtap="savePreferences">{{saving ? '正在保存…' : '保存设置'}}</button>
 
     <text class="section-label">微信订阅提醒</text>
     <view class="ios-card subscription-card">
@@ -98,8 +103,8 @@
     </view>
 
     <view class="scope-card">
-      <text>提醒边界</text>
-      <text>授权必须由你主动点击；服务器 Worker 按设置时间检查到期卡。发送结果不确定时不会盲目重发，避免重复提醒。</text>
+      <text>授权与发送</text>
+      <text>授权只增加可用提醒次数，不代表消息已发送。开启提醒并保存设置后，有到期内容且发送服务可用时才会提醒你。</text>
     </view>
   </block>
 </view>

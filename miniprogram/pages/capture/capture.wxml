@@ -56,14 +56,15 @@
 
     <view wx:if="{{!conversationTurns.length && !busy}}" class="centered-empty-state">
       <view class="brand-mark">M</view>
-      <text class="empty-title">今天想记住什么？</text>
-      <text class="empty-supporting">粘贴文章、链接，或者直接问我</text>
+      <text class="empty-title">把材料变成知识点</text>
+      <text class="empty-supporting">有原文可追溯，有问题可复习。</text>
+      <text class="capture-flow">添加材料 → 审阅并确认 → 开始复习</text>
       <view class="quick-actions">
-        <button data-placeholder="粘贴要总结的文章或链接…" bindtap="chooseQuickAction">总结文章</button>
-        <button data-placeholder="写下你想记住的知识…" bindtap="chooseQuickAction">记录知识</button>
-        <button data-placeholder="写下需要梳理的想法…" bindtap="chooseQuickAction">整理想法</button>
-        <button data-placeholder="写下你想理解的问题…" bindtap="chooseQuickAction">问一个问题</button>
+        <button bindtap="pasteClipboard">粘贴材料</button>
+        <button bindtap="promptForLink">添加链接</button>
       </view>
+      <button class="example-action" bindtap="useExample">使用一份示例材料 ›</button>
+      <text class="example-note">先填入、再编辑，点击发送后才开始整理。</text>
     </view>
 
     <view class="conversation-content">
@@ -149,9 +150,11 @@
         <view wx:for="{{memoryCandidates}}" wx:key="id" class="memory-approval-card">
           <text class="memory-approval-label">长期记忆建议</text>
           <text class="memory-approval-content">{{item.content}}</text>
+          <view class="memory-approval-explanation"><text>为什么建议记住</text><text>{{item.rationale || '暂无建议原因，可先忽略。'}}</text></view>
+          <view class="memory-approval-explanation"><text>保存后用于什么</text><text>经你批准后，可在后续整理相关材料时作为学习背景参考。忽略不会移除已确认的知识点。</text></view>
           <view class="memory-approval-actions">
             <button data-id="{{item.id}}" data-decision="reject" bindtap="decideMemory">忽略</button>
-            <button data-id="{{item.id}}" data-decision="approve" bindtap="decideMemory">保存</button>
+            <button data-id="{{item.id}}" data-decision="approve" bindtap="decideMemory">批准并记住</button>
           </view>
         </view>
       </block>
@@ -160,6 +163,7 @@
   </scroll-view>
 
   <view class="composer-dock">
+    <text wx:if="{{inputNotice}}" class="input-notice">{{inputNotice}}</text>
     <view class="message-composer">
       <textarea
         class="composer-textarea"

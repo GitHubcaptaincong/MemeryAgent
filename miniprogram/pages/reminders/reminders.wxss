@@ -1,3 +1,6 @@
+.reminders-page { padding-bottom: calc(156rpx + env(safe-area-inset-bottom)); }
+.settings-unsaved { margin-bottom: 20rpx; padding: 20rpx 24rpx; border-radius: 20rpx; color: #3d6f9f; background: #e8f2ff; font-size: 25rpx; line-height: 1.5; }
+
 .loading-settings {
   padding: 70rpx 28rpx;
   color: #8e8e93;

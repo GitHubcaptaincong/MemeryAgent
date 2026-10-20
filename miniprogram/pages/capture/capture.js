@@ -5,6 +5,7 @@ const { openEvidence } = require('../../utils/evidence')
 
 const finishedStates = ['awaiting_user', 'completed', 'failed', 'cancelled', 'budget_exhausted']
 const terminalStates = finishedStates.concat('retry_wait')
+const exampleMaterial = '幂等性：重复执行同一个请求，对业务状态产生的最终影响与执行一次相同。\n\n例如，创建订单接口可以接收客户端生成的幂等键。服务端把幂等键与订单结果关联保存；相同请求再次到达时返回已有结果，避免创建重复订单。\n\n幂等键应限定在具体用户和业务操作范围内。同一个键携带不同请求内容时，应拒绝请求，避免把旧结果当作新操作的结果。'
 
 function finalizationStatus(events, now = Date.now()) {
   const valid = [...events].reverse().find((event) => (
@@ -118,9 +119,10 @@ Page({
     conversationTurns: [],
     expandedTurnIds: {},
     expandedResultId: '',
-    composerPlaceholder: '发消息、粘贴文章或链接…',
+    composerPlaceholder: '粘贴学习材料，或输入公开文章链接…',
     composerFocused: false,
     showCharCount: false,
+    inputNotice: '',
     scrollIntoView: '',
     busy: false,
     canceling: false,
@@ -211,18 +213,43 @@ Page({
 
   onContentInput(event) {
     const content = event.detail.value
-    this.setData({ content, charCount: content.length, showCharCount: content.length >= 40000 })
+    this.setData({ content, charCount: content.length, showCharCount: content.length >= 40000, inputNotice: '' })
   },
 
   onComposerBlur() {
     this.setData({ composerFocused: false })
   },
 
-  chooseQuickAction(event) {
-    this.setData({
-      composerPlaceholder: event.currentTarget.dataset.placeholder,
-      composerFocused: true,
-    })
+  useExample() {
+    this.fillMaterial(exampleMaterial, '示例已填入，可编辑后点击发送；发送后才会开始整理。')
+  },
+
+  fillMaterial(value, notice = '材料已填入，点击发送开始整理。') {
+    if (this.data.busy || this.data.confirmingDraftId) return
+    const content = String(value || '').trim()
+    if (!content) {
+      this.setData({ inputNotice: '没有读取到文字，你也可以直接在输入框粘贴材料。' })
+      return
+    }
+    if (content.length > 50000) {
+      this.setData({ error: '材料超过 50,000 字，请缩短后再添加。' })
+      return
+    }
+    const previous = this.data.content
+    const apply = () => {
+      if (this.data.busy || this.data.confirmingDraftId || this.data.content !== previous) return
+      this.setData({
+        content, charCount: content.length, showCharCount: content.length >= 40000,
+        composerFocused: true, inputNotice: notice, error: '',
+      })
+    }
+    if (previous.trim() && previous !== content) {
+      wx.showModal({
+        title: '替换输入框中的材料？', content: '当前内容尚未发送。替换后可继续编辑。',
+        confirmText: '替换', cancelText: '保留',
+        success: ({ confirm }) => { if (confirm) apply() },
+      })
+    } else apply()
   },
 
   openAttachmentMenu() {
@@ -236,6 +263,7 @@ Page({
   },
 
   promptForLink() {
+    if (this.data.busy || this.data.confirmingDraftId) return
     wx.showModal({
       title: '添加公开链接',
       editable: true,
@@ -243,27 +271,20 @@ Page({
       confirmText: '添加',
       success: ({ confirm, content }) => {
         if (!confirm || !content) return
-        this.setData({
-          content: content.trim(),
-          charCount: content.trim().length,
-          composerFocused: true,
-          error: '',
-        })
+        if (!standaloneUrl(content)) {
+          this.setData({ error: '请输入完整的 http:// 或 https:// 公开文章链接。' })
+          return
+        }
+        this.fillMaterial(content, '链接已填入，点击发送读取并整理公开文章。')
       },
     })
   },
 
   pasteClipboard() {
+    if (this.data.busy || this.data.confirmingDraftId) return
     wx.getClipboardData({
       success: ({ data }) => {
-        const content = String(data || '').slice(0, 50000)
-        this.setData({
-          content,
-          charCount: content.length,
-          showCharCount: content.length >= 40000,
-          composerFocused: true,
-          error: '',
-        })
+        this.fillMaterial(data)
       },
       fail: () => wx.showToast({ title: '无法读取剪贴板', icon: 'none' }),
     })
@@ -415,6 +436,7 @@ Page({
       expandedUnitIds: {},
       content: '',
       charCount: 0,
+      inputNotice: '',
       sourceSaved: null,
       run: null,
       runStateLabel: '',
@@ -427,7 +449,7 @@ Page({
       finalizingElapsedText: '',
       processingFacts: [],
       currentActivity: '等待记录',
-      composerPlaceholder: '发消息、粘贴文章或链接…',
+      composerPlaceholder: '粘贴学习材料，或输入公开文章链接…',
     })
     this.setTabBarHidden(false)
   },
@@ -579,6 +601,7 @@ Page({
         ),
         content: '',
         charCount: 0,
+        inputNotice: '',
         currentActivity: '材料已保存，AI 正在后台整理',
         run: started.run,
         runStateLabel: stateLabel(started.run.state),

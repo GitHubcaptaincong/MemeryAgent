@@ -6,7 +6,7 @@ Component({
     tabs: [
       { pagePath: '/pages/capture/capture', text: '整理', icon: '＋' },
       { pagePath: '/pages/review/review', text: '复习', icon: '◉' },
-      { pagePath: '/pages/reminders/reminders', text: '提醒', icon: '◷' },
+      { pagePath: '/pages/reminders/reminders', text: '设置', icon: '⚙' },
     ],
   },
 

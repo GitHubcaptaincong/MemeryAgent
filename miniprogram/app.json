@@ -4,6 +4,7 @@
     "pages/review/review",
     "pages/evidence/evidence",
     "pages/process/process",
+    "pages/knowledge-edit/knowledge-edit",
     "pages/insights/insights",
     "pages/reminders/reminders"
   ],
@@ -32,7 +33,7 @@
       },
       {
         "pagePath": "pages/reminders/reminders",
-        "text": "提醒"
+        "text": "设置"
       }
     ]
   },

@@ -1,0 +1,30 @@
+<view class="page-shell edit-page">
+  <text class="edit-title">{{unit ? unit.title : '编辑知识点'}}</text>
+  <text class="edit-note">把问题问清楚，用自己的话完善答案要点。</text>
+  <view wx:if="{{error}}" class="error-banner">{{error}}</view>
+  <view wx:if="{{saved}}" class="success-banner">✓ 问答已保存，后续复习将使用新内容。</view>
+  <view wx:if="{{loading}}" class="ios-card card-padding">正在读取知识点…</view>
+  <button wx:elif="{{!unit}}" class="ios-button ios-button--plain" bindtap="loadUnit">重新加载</button>
+  <block wx:else>
+    <view class="ios-card card-padding">
+      <view class="field-heading"><text>复习问题</text><text>{{question.length}} / 4000</text></view>
+      <textarea class="question-input" value="{{question}}" maxlength="4000" disabled="{{saving}}" auto-height data-field="question" bindinput="onFieldInput" placeholder="写一个能够检验理解的问题…" cursor-spacing="120"></textarea>
+    </view>
+    <view class="ios-card card-padding">
+      <view class="field-heading"><text>答案要点</text><text>{{answer.length}} / 8000</text></view>
+      <text class="edit-note">每行一个要点，支持多行编辑。</text>
+      <textarea class="answer-input" value="{{answer}}" maxlength="8000" disabled="{{saving}}" auto-height data-field="answer" bindinput="onFieldInput" placeholder="写下机制、原因、边界或步骤…" cursor-spacing="120"></textarea>
+    </view>
+    <view class="ios-card card-padding evidence-section">
+      <text class="field-label">原文依据</text>
+      <text class="edit-note">以下是整理时保存的原文引用。修改问答不会改写这些依据，请核对答案是否仍受原文支持。</text>
+      <text wx:for="{{unit.evidence}}" wx:key="index" class="evidence-quote" selectable>{{index + 1}}. “{{item.quote}}”</text>
+      <button wx:if="{{unit.evidence.length}}" class="evidence-link" bindtap="viewEvidence">查看完整原文与定位（{{unit.evidence.length}}） ›</button>
+      <text wx:else class="edit-note">该知识点暂无保存的原文依据。</text>
+    </view>
+  </block>
+  <view class="edit-actions">
+    <button class="ios-button ios-button--plain" disabled="{{saving}}" bindtap="cancel">{{dirty ? '取消' : '返回知识集'}}</button>
+    <button class="ios-button" disabled="{{loading || saving || !unit || !dirty}}" bindtap="save">{{saving ? '正在保存…' : '保存修改'}}</button>
+  </view>
+</view>

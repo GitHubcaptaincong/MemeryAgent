@@ -149,9 +149,9 @@
 
 .centered-empty-state {
   display: flex;
-  min-height: 74vh;
+  min-height: 56vh;
   align-items: center;
-  padding: 0 48rpx 18vh;
+  padding: 48rpx 36rpx 32rpx;
   flex-direction: column;
   justify-content: center;
   text-align: center;
@@ -185,6 +185,14 @@
   color: #6e6e73;
   font-size: 28rpx;
 }
+
+.capture-flow { margin-top: 20rpx; color: #636366; font-size: 25rpx; line-height: 1.6; }
+.example-action { margin: 24rpx 0 0; padding: 12rpx; background: transparent; color: #007aff; font-size: 27rpx; line-height: 1.5; }
+.example-note { color: #636366; font-size: 24rpx; line-height: 1.6; }
+.input-notice { display: block; padding: 0 12rpx 12rpx; color: #3d6f9f; font-size: 24rpx; line-height: 1.5; }
+.memory-approval-explanation { margin-top: 20rpx; font-size: 26rpx; line-height: 1.6; }
+.memory-approval-explanation text { display: block; color: #48484a; }
+.memory-approval-explanation text:first-child { margin-bottom: 6rpx; color: #636366; font-size: 23rpx; }
 
 .quick-actions {
   display: flex;

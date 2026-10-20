@@ -51,6 +51,8 @@ Page({
     saving: false,
     subscribing: false,
     saved: false,
+    dirty: false,
+    preferencesAvailable: false,
     error: '',
     form: {
       enabled: true,
@@ -78,7 +80,7 @@ Page({
   onShow() {
     const tabBar = typeof this.getTabBar === 'function' && this.getTabBar()
     if (tabBar) tabBar.setData({ selected: 2 })
-    this.loadPreferences()
+    if (!this.data.dirty && !this.data.saving && !this.data.subscribing) this.loadPreferences()
   },
 
   onPullDownRefresh() {
@@ -86,6 +88,12 @@ Page({
   },
 
   async loadPreferences() {
+    if (this.data.saving || this.data.subscribing || this.loadingPreferences) return
+    if (this.data.dirty) {
+      this.setData({ error: '有尚未保存的设置，请先保存再刷新。' })
+      return
+    }
+    this.loadingPreferences = true
     this.setData({ loading: true, error: '' })
     try {
       const [form, subscriptionResult] = await Promise.all([
@@ -101,6 +109,8 @@ Page({
       const timezone = localTimezone()
       this.setData({
         loading: false,
+        preferencesAvailable: true,
+        saved: false,
         form: { ...form, timezone },
         subscription: { ...subscription, last_sent_label: sentAtLabel(subscription.last_sent_at) },
         subscriptionStatusAvailable,
@@ -110,42 +120,45 @@ Page({
     } catch (error) {
       this.setData({
         loading: false,
+        preferencesAvailable: false,
         error: error.message,
         subscriptionStatusAvailable: false,
         subscriptionStatusError: error.message,
         subscriptionAuthorizationEnabled: false,
       })
-    }
+    } finally { this.loadingPreferences = false }
   },
 
+  canEdit() { return this.data.preferencesAvailable && !this.data.loading && !this.data.saving },
+
   onEnabledChange(event) {
-    this.setData({ 'form.enabled': event.detail.value, saved: false })
+    if (this.canEdit()) this.setData({ 'form.enabled': event.detail.value, saved: false, dirty: true })
   },
 
   onTimeChange(event) {
-    this.setData({ 'form.preferred_time': event.detail.value, saved: false })
+    if (this.canEdit()) this.setData({ 'form.preferred_time': event.detail.value, saved: false, dirty: true })
   },
 
   onOverdueChange(event) {
-    this.setData({ 'form.overdue_enabled': event.detail.value, saved: false })
+    if (this.canEdit()) this.setData({ 'form.overdue_enabled': event.detail.value, saved: false, dirty: true })
   },
 
   onAiEvaluationChange(event) {
-    this.setData({ 'form.ai_evaluation_enabled': event.detail.value, saved: false })
+    if (this.canEdit()) this.setData({ 'form.ai_evaluation_enabled': event.detail.value, saved: false, dirty: true })
   },
 
   onLimitChanging(event) {
+    if (!this.canEdit()) return
     const dailyLimit = Math.max(1, Math.min(100, Number(event.detail.value)))
-    this.setData({ 'form.daily_limit': dailyLimit, saved: false })
+    this.setData({ 'form.daily_limit': dailyLimit, saved: false, dirty: true })
   },
 
   onLimitChange(event) {
-    const dailyLimit = Math.max(1, Math.min(100, Number(event.detail.value)))
-    this.setData({ 'form.daily_limit': dailyLimit, saved: false })
+    this.onLimitChanging(event)
   },
 
   async savePreferences() {
-    if (this.data.saving) return
+    if (!this.canEdit()) return
     this.setData({ saving: true, saved: false, error: '' })
     try {
       const form = await api.put('/reminders/preferences', {
@@ -156,7 +169,7 @@ Page({
         ai_evaluation_enabled: this.data.form.ai_evaluation_enabled,
         timezone: this.data.form.timezone,
       })
-      this.setData({ saving: false, saved: true, form })
+      this.setData({ saving: false, saved: true, dirty: false, form })
       wx.showToast({ title: '设置已保存', icon: 'success' })
     } catch (error) {
       this.setData({ saving: false, error: error.message })
